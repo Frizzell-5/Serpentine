@@ -342,3 +342,16 @@ textarea.data-text { font: 12px/1.5 var(--font-data); white-space: pre; overflow
   .command-row .btn { flex: none; }
 }
 .sessions-table td:nth-child(2) input { min-width: 88px; }
+
+/* Last good figure stays visible (dimmed) while an error is shown */
+.figures.stale, .results.stale { opacity: 0.4; filter: grayscale(0.4); pointer-events: none; }
+/* Sessions table helpers */
+.sessions-table input.missing { border-color: var(--warn); background: var(--warn-soft); }
+.paste-sessions { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 6px; padding: 10px; }
+
+/* First-visit guide */
+.welcome { background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px 18px; display: flex; gap: 18px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; }
+.welcome h2 { font-size: 17px; margin-bottom: 4px; }
+.welcome p { margin: 0 0 6px; color: var(--muted); }
+.welcome ol { margin: 0 0 6px; padding-left: 20px; display: grid; gap: 3px; font-size: 13.5px; }
+.welcome-text { flex: 1 1 380px; min-width: 0; }

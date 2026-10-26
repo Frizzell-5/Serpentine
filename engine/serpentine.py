@@ -30,7 +30,7 @@ from scipy.optimize import curve_fit  # noqa: E402
 
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
-ENGINE_VERSION = "0.4.0"
+ENGINE_VERSION = "0.5.0"
 
 
 class UserError(Exception):
@@ -128,6 +128,8 @@ def _read_table(text):
     rows = list(csv.reader(lines, delimiter=sep))
     width = max(len(r) for r in rows)
     rows = [r + [""] * (width - len(r)) for r in rows]
+    if len(rows) == 1 and not any(_is_value(c, comma_decimal) for c in rows[0]):
+        raise UserError("This table has column names but no values under them yet.")
 
     # The first row where most cells are values is where the data starts;
     # everything above it (up to 3 rows) is joined into the column names.
@@ -171,7 +173,8 @@ def _read_table(text):
         else:
             cols[name], kinds[name] = [str(c).strip() for c in raw], "text"
     if not cols:
-        raise UserError("No columns with data were found.")
+        raise UserError("This table has column names but no values under them yet." if header_rows and len(body) <= 1
+                        and not any(str(c).strip() for r in body for c in r) else "No columns with data were found.")
     df = pd.DataFrame(cols)
     value_cols = [c for c in df.columns if kinds[c] != "text"]
     if value_cols:
@@ -979,7 +982,9 @@ def draw_brackets(ax, comparisons, tops, s):
     """comparisons: list of (i, j, p). Stacks brackets beyond the groups on the value axis."""
     show = [(i, j, p) for i, j, p in comparisons if s["show_ns"] or (p is not None and p < 0.05)]
     if s["sig"] == "none" or not show or not tops:
-        return
+        return 0
+    if len(show) > 12:  # a wall of brackets helps no one; the table has them all
+        return -len(show)
     H = s["orientation"] == "horizontal"
     log = s["logy"]
     tr = (lambda y: math.log10(max(y, 1e-12))) if log else (lambda y: y)
@@ -1016,6 +1021,7 @@ def draw_brackets(ax, comparisons, tops, s):
         ax.set_xlim(right=inv(top_used))
     elif not H and str(s["ymax"]).strip() == "":
         ax.set_ylim(top=inv(top_used))
+    return len(show)
 
 
 def describe(names, values, labels=None):
@@ -1055,8 +1061,40 @@ def _article(test):
     return test[0].lower() + test[1:] if test.split(" ")[0] in ("One-way", "Repeated-measures", "Paired") else test
 
 
+_STATS_CACHE = {}
+
+
 def compare_stats(names, values, paired=False, mode="auto", posthoc="all", equal_var=False):
-    """Pick and run the right test. Never raises on awkward data; problems become notes."""
+    """Pick and run the right test. Never raises on awkward data; problems become notes.
+
+    Results are cached, so changing only the figure's look doesn't recompute the statistics."""
+    key = (tuple(names), tuple(np.asarray(v, float).tobytes() for v in values), bool(paired), mode, posthoc, bool(equal_var))
+    hit = _STATS_CACHE.get(key)
+    if hit is not None:
+        return dict(hit, notes=list(hit["notes"]), pairs=list(hit["pairs"]))
+    res = _compare_stats_safe(names, values, paired, mode, posthoc, equal_var)
+    if len(_STATS_CACHE) > 128:
+        _STATS_CACHE.clear()
+    _STATS_CACHE[key] = res
+    return dict(res, notes=list(res["notes"]), pairs=list(res["pairs"]))
+
+
+def _tukey_pairs(vals, pairs):
+    """Tukey-Kramer p-values for the requested pairs only (SciPy's tukey_hsd computes all k*k)."""
+    k = len(vals)
+    ns = np.array([len(v) for v in vals], float)
+    means = np.array([np.mean(v) for v in vals])
+    df = ns.sum() - k
+    mse = sum(((v - v.mean()) ** 2).sum() for v in vals) / df
+    out = []
+    for i, j in pairs:
+        se = math.sqrt(mse / 2 * (1 / ns[i] + 1 / ns[j]))
+        q = abs(means[i] - means[j]) / se if se > 0 else np.inf
+        out.append(float(stats.studentized_range.sf(q, k, df)) if np.isfinite(q) else 0.0)
+    return out
+
+
+def _compare_stats_safe(names, values, paired=False, mode="auto", posthoc="all", equal_var=False):
     try:
         return _compare_stats(names, values, paired, mode, posthoc, equal_var)
     except (ValueError, FloatingPointError, ZeroDivisionError, np.linalg.LinAlgError) as e:
@@ -1174,8 +1212,7 @@ def _compare_stats(names, values, paired, mode, posthoc, equal_var):
         out.update(test="One-way ANOVA", p=r.pvalue,
                    line="F(%d, %d) = %.3f, %s" % (k - 1, N - k, r.statistic, fmt_p(r.pvalue)))
         if posthoc == "all":
-            tk = stats.tukey_hsd(*vals)
-            adj = [tk.pvalue[i, j] for i, j in pairs]
+            adj = _tukey_pairs(vals, pairs)
             ph_name = "Tukey's multiple comparisons test"
         else:
             try:
@@ -1262,6 +1299,18 @@ def _numeric_cols(df, info):
     return [c for c in df.columns if info["kinds"][c] in ("number", "time")]
 
 
+def _choose(S, key, df, auto, notes, what):
+    """The column the user picked, or the automatic choice if that column isn't in this table
+    (e.g. settings left over from the example data)."""
+    wanted = S.get(key) or ""
+    if wanted and wanted in df.columns:
+        return wanted
+    if wanted and auto:
+        notes.append('The %s column "%s" isn\'t in this table, so "%s" was used. Pick another in Settings if needed.'
+                     % (what, wanted, auto))
+    return auto
+
+
 def _need_col(df, col, what):
     if col not in df.columns:
         raise UserError('Choose a %s column (couldn\'t find "%s").' % (what, col))
@@ -1276,25 +1325,31 @@ def _order(found, order_text):
 
 def _group_figure(names, values, s, res, paired, ylabel, title="", width=None):
     fig, ax = _new_fig(s, width)
+    if s["logy"] and any((np.asarray(v, float) <= 0).any() for v in values):
+        res["notes"].append("Values of 0 or below can't be drawn on a log scale and are hidden.")
     with plt.rc_context(_rc(s)):
         pm = np.column_stack(values) if paired else None
         tops = plot_groups(ax, names, values, s, paired_matrix=pm)
         H = s["orientation"] == "horizontal"
         _finish(ax, s, xlabel=ylabel if H else "", ylabel="" if H else ylabel, title=title)
-        draw_brackets(ax, res["pairs"], tops, s)
+        drawn = draw_brackets(ax, res["pairs"], tops, s)
+    if drawn < 0:
+        res["notes"].append("%d comparisons are significant, too many to draw as brackets. They're listed in the "
+                            "Multiple comparisons table; you can also compare each group with the first only." % -drawn)
     return fig
 
 
 def analysis_compare(datasets, S, s):
     d = _pick_dataset(datasets, S.get("dataset"))
     df, info = read_table(d["text"])
+    col_notes = []
     layout = S.get("layout", "wide")
     paired = bool(S.get("paired")) and layout == "wide"
     if layout == "long":
         num = _numeric_cols(df, info)
-        vcol = S.get("value_col") or (num[0] if num else None)
         text_cols = [c for c in df.columns if info["kinds"][c] == "text"]
-        gcol = S.get("group_col") or (text_cols[0] if text_cols else None)
+        vcol = _choose(S, "value_col", df, num[0] if num else None, col_notes, "value")
+        gcol = _choose(S, "group_col", df, text_cols[0] if text_cols else None, col_notes, "group")
         if not vcol or not gcol:
             raise UserError("The values + group layout needs a value column and a group column.")
         _need_col(df, vcol, "value")
@@ -1345,7 +1400,7 @@ def analysis_compare(datasets, S, s):
     tables = [describe(names, values, shown)] + stats_tables(shown, res)
     return {
         "figures": [{"id": "groups", "title": "Group comparison", "fig": fig, "style": s}],
-        "tables": tables, "summary": summary, "notes": notes + res["notes"],
+        "tables": tables, "summary": summary, "notes": col_notes + notes + res["notes"],
         "methods": _methods(s, res, norm_note), "groups": names,
     }
 
@@ -1411,7 +1466,18 @@ def analysis_timecourse(datasets, S, s):
     notes = []
 
     per = []
+    no_base, no_end = [], []
     tcol = vcol = None
+    all_cols = [set(read_table(d["text"])[0].columns) for d in sessions]
+    S = dict(S)
+    for key, what in (("time_col", "time"), ("value_col", "measurement"), ("filter_col", "quality")):
+        if S.get(key) and not any(S[key] in cols for cols in all_cols):
+            if key == "filter_col":
+                notes.append('The quality column "%s" isn\'t in this data, so the quality filter was skipped.' % S[key])
+            else:
+                notes.append('The %s column "%s" isn\'t in this data, so one was picked automatically. '
+                             'Choose another in Settings if needed.' % (what, S[key]))
+            S[key] = ""
     for d in sessions:
         meta = d.get("meta") or {}
         name = d.get("name") or "Session"
@@ -1420,9 +1486,12 @@ def analysis_timecourse(datasets, S, s):
         times = [c for c in df.columns if info["kinds"][c] == "time"]
         tcol = S.get("time_col") or (times[0] if times else (num[0] if num else None))
         vcol = S.get("value_col") or next((c for c in num if c != tcol), None)
+        if not tcol or not vcol:
+            raise UserError('Session "%s" needs a time column and at least one numeric measurement column. '
+                            'Check how the table was read in the Data step.' % name)
         if tcol not in df.columns or vcol not in df.columns:
-            raise UserError('Session "%s" has no column "%s" or "%s". All sessions need the same column names.'
-                            % (name, tcol, vcol))
+            missing = tcol if tcol not in df.columns else vcol
+            raise UserError('Session "%s" has no column called "%s". All sessions need the same column names.' % (name, missing))
         if tcol == vcol:
             raise UserError("The time column and the measurement can't be the same column.")
         t = df[tcol].to_numpy(float)
@@ -1478,7 +1547,7 @@ def analysis_timecourse(datasets, S, s):
         in_base = (centers >= bs) & (centers <= be)
         base = float(np.mean(bv[in_base])) if in_base.any() else np.nan
         if not in_base.any():
-            notes.append('"%s" has no data in the baseline window (%g to %g min).' % (name, bs, be))
+            no_base.append(name)
         elif norm in ("pct", "fold") and base == 0:
             notes.append('"%s" has a baseline of 0, so it can\'t be expressed relative to baseline.' % name)
             base = np.nan
@@ -1519,7 +1588,29 @@ def analysis_timecourse(datasets, S, s):
             else:
                 p["end"] = float(np.mean(y))
         if not np.isfinite(p["end"]):
-            notes.append('"%s" has no data in the endpoint window (%g to %g min).' % (p["name"], es, ee))
+            if not (norm != "raw" and not np.isfinite(p["base"])):  # already explained by the missing baseline
+                no_end.append(p["name"])
+
+    # One clear note per problem, with a window that fits the recordings
+    first_min = min(float(p["centers"].min()) for p in per)
+    last_min = max(float(p["centers"].max()) for p in per)
+    if no_base:
+        who = "No session" if len(no_base) == len(per) else ", ".join('"%s"' % n for n in no_base)
+        hint = (" Recordings start about %.0f min before the event; try a baseline from %g to 0." % (-first_min, max(round(first_min), bs))
+                if first_min < 0 else " Check the event time: there's no recording before it.")
+        notes.append(("No session has data in the baseline window (%g to %g min).%s" % (bs, be, hint)) if who == "No session"
+                     else "%s %s no data in the baseline window (%g to %g min)%s. Check %s event time and exclusions."
+                     % (who, "has" if len(no_base) == 1 else "have", bs, be,
+                        ", so it's left out of the results" if norm != "raw" and len(no_base) == 1 else
+                        (", so they're left out of the results" if norm != "raw" else ""), "its" if len(no_base) == 1 else "their"))
+    if no_end:
+        who = "No session" if len(no_end) == len(per) else ", ".join('"%s"' % n for n in no_end)
+        span = max(1.0, min(5.0, last_min / 2)) if last_min > 0 else 0
+        hint = (" Recordings end about %.0f min after the event; try an endpoint from %g to %g min." % (last_min, round(max(0, last_min - span)), round(last_min))
+                if last_min > 0 else " Check the event time: there's no recording after it.")
+        notes.append(("No session has data in the endpoint window (%g to %g min).%s" % (es, ee, hint)) if who == "No session"
+                     else "%s %s no data in the endpoint window (%g to %g min). Check %s event time, exclusions and recording length."
+                     % (who, "has" if len(no_end) == 1 else "have", es, ee, "its" if len(no_end) == 1 else "their"))
 
     unit = NORM_LABELS.get(norm, "")
     ylabel = "%s (%s)" % (vcol, unit) if unit else vcol
@@ -1657,8 +1748,9 @@ def analysis_correlation(datasets, S, s):
     d = _pick_dataset(datasets, S.get("dataset"))
     df, info = read_table(d["text"])
     num = _numeric_cols(df, info)
-    xcol = S.get("x_col") or (num[0] if num else None)
-    ycol = S.get("y_col") or (num[1] if len(num) > 1 else None)
+    col_notes = []
+    xcol = _choose(S, "x_col", df, num[0] if num else None, col_notes, "X")
+    ycol = _choose(S, "y_col", df, next((c for c in num if c != xcol), None), col_notes, "Y")
     if not xcol or not ycol:
         raise UserError("Correlation needs two numeric columns.")
     _need_col(df, xcol, "X")
@@ -1728,7 +1820,7 @@ def analysis_correlation(datasets, S, s):
                " and an ordinary least-squares linear fit (shaded band: 95% confidence interval)" if S.get("fit", True) else "",
                _software_line()))
     return {"figures": [{"id": "scatter", "title": "Correlation", "fig": fig, "style": s}],
-            "tables": tables, "summary": summary, "notes": notes, "methods": meth, "groups": groups}
+            "tables": tables, "summary": summary, "notes": col_notes + notes, "methods": meth, "groups": groups}
 
 
 def _four_pl(logx, bottom, top, log_ec50, hill):
@@ -1740,7 +1832,8 @@ def analysis_dose(datasets, S, s):
     d = _pick_dataset(datasets, S.get("dataset"))
     df, info = read_table(d["text"])
     num = _numeric_cols(df, info)
-    xcol = S.get("x_col") or (num[0] if num else None)
+    col_notes = []
+    xcol = _choose(S, "x_col", df, num[0] if num else None, col_notes, "concentration")
     if not xcol:
         raise UserError("Choose the concentration column.")
     _need_col(df, xcol, "concentration")
@@ -1788,6 +1881,9 @@ def analysis_dose(datasets, S, s):
                            edgecolor=pe, linewidth=s["point_edge_width"], zorder=4, label=g["label"])
             if len(ux) < 4:
                 notes.append("%s: a 4-parameter fit needs at least 4 concentrations." % g["label"])
+                continue
+            if np.ptp(means) <= 1e-9 * max(1.0, abs(float(np.mean(means)))):
+                notes.append("%s: the response doesn't change with concentration, so no curve was fitted." % g["label"])
                 continue
             fixed = {}
             if fix_bottom is not None:
@@ -1857,7 +1953,7 @@ def analysis_dose(datasets, S, s):
     if any(len(cols) > 1 for _, cols in curves) and not S.get("all_points", False):
         meth = "Points show mean +/- %s of replicates. " % ERROR_NAMES.get(s["error"], "SEM") + meth
     return {"figures": [{"id": "dose", "title": "Dose-response", "fig": fig, "style": s}],
-            "tables": tables, "summary": summary, "notes": notes, "methods": meth,
+            "tables": tables, "summary": summary, "notes": col_notes + notes, "methods": meth,
             "groups": [c[0] for c in curves]}
 
 

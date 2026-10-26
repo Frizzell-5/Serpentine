@@ -247,7 +247,7 @@ footer .sp { margin-left: auto; }
   <!-- Hero -->
   <section class="hero">
     <div class="wrap">
-      <div class="eyebrow rise"><span>v0.4</span><i></i><span>Free</span><i></i><span>Runs in your browser</span></div>
+      <div class="eyebrow rise"><span>v0.5</span><i></i><span>Free</span><i></i><span>Runs in your browser</span></div>
       <h1 class="rise d1">Raw lab data in. <em>Publication figures</em> out.</h1>
       <p class="lede rise d2">Serpentine runs the statistics and draws the figures for you, using the same Python tools behind countless published studies. You choose everything from plain menus and never write a line of code. Your data stays on your computer.</p>
       <div class="cta rise d3">
@@ -513,6 +513,13 @@ M2      KO         29.4
             </table></div>
             <p>In <strong>Settings</strong>, choose the measurement, the bin size, the baseline window (for example −5 to 0 min), how to express values (% of baseline, change from baseline, fold, or raw) and the endpoint window that gets tested. A <strong>quality column</strong> filter lets you keep only rows that pass a check, for example a cycle count of at least 10.</p>
             <p>Turn on <strong>Pair sessions by subject</strong> when the same animals were recorded under each condition, so Serpentine uses a paired test.</p>
+            <h4>Filling in the sessions table quickly</h4>
+            <ul>
+              <li><strong>Fill group &amp; subject from names:</strong> name your tables like <code>Morphine 6792</code> or <code>Saline_M101</code> and one click fills in the group and subject.</li>
+              <li><strong>Paste session details:</strong> paste a small sheet from Excel with columns such as <code>Session</code>, <code>Group</code>, <code>Subject</code>, <code>Event</code> and <code>Exclude</code>. Rows are matched by session name (or in order if there's no Session column).</li>
+              <li>Sessions still missing an event time are highlighted.</li>
+            </ul>
+            <p>If a window doesn't fit your recordings, Serpentine says so and suggests one that does, for example “Recordings end about 10 min after the event; try an endpoint from 5 to 10 min.”</p>
           </article>
 
           <article id="g-stats">
@@ -615,7 +622,7 @@ M2      KO         29.4
 
 <footer>
   <div class="wrap">
-    <span><b style="color:var(--ink)">Serpentine</b> v0.4 · Made by Shadan Alrawi</span>
+    <span><b style="color:var(--ink)">Serpentine</b> v0.5 · Made by Shadan Alrawi</span>
     <a href="https://github.com/Frizzell-5/Serpentine">GitHub</a>
     <a href="https://github.com/Frizzell-5/Serpentine/issues">Report an issue</a>
     <span class="sp">Built on Pyodide, NumPy, SciPy, pandas and matplotlib.</span>

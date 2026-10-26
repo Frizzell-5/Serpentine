@@ -277,7 +277,14 @@ function setStatus(kind, text) {
   $(".status-text", el).textContent = text;
 }
 
+const WELCOME_KEY = "serpentine.welcomed.v1";
+function showWelcome() {
+  if (store(WELCOME_KEY)) return;
+  $("#welcome").hidden = false;
+}
+
 async function onEngineReady() {
+  showWelcome();
   if (queuedExample) {
     const k = queuedExample;
     queuedExample = null;
@@ -451,10 +458,21 @@ function renderUndo() {
   $("#btn-redo").disabled = !history.future.length;
 }
 
+const COLUMN_KEYS = ["dataset", "columns", "value_col", "group_col", "group_order", "y_name", "time_col", "filter_col", "filter_min", "filter_max", "x_col", "y_col", "y_cols", "curve_name", "x_unit"];
+function forgetExampleColumns() {
+  // The example's column names and group colours mean nothing for the user's own table.
+  for (const [kind, defaults] of Object.entries(DEFAULT_SETTINGS)) {
+    for (const k of COLUMN_KEYS) if (k in defaults) state.settings[kind][k] = clone(defaults[k]);
+  }
+  state.style.groups = {};
+}
+
 function changed({ run = true, clearExample = false, delay } = {}) {
   if (clearExample && state.example) {
     state.example = null;
     $("#example-badge").hidden = true;
+    forgetExampleColumns();
+    if (state.step === "settings") renderSettings();
   }
   autosave();
   recordHistory();
@@ -1076,11 +1094,20 @@ function renderData() {
           <td><button type="button" data-select="${d.id}" title="${esc(d.name)}">${esc(d.name)}${inspected[d.id]?.error ? ' <span class="err">!</span>' : ""}</button></td>
           <td><input type="text" id="m-${d.id}-group" data-meta="group" data-id="${d.id}" value="${esc(d.meta.group)}" placeholder="Saline" spellcheck="false"></td>
           <td><input type="text" id="m-${d.id}-subject" data-meta="subject" data-id="${d.id}" value="${esc(d.meta.subject)}" placeholder="M1" spellcheck="false"></td>
-          <td><input type="text" id="m-${d.id}-event" data-meta="event" data-id="${d.id}" value="${esc(d.meta.event)}" placeholder="13:27" spellcheck="false"></td>
+          <td><input type="text" id="m-${d.id}-event" data-meta="event" data-id="${d.id}" value="${esc(d.meta.event)}" placeholder="13:27" spellcheck="false"${d.meta.event ? "" : ' class="missing" title="Add the injection or stimulus time"'}></td>
           <td><input type="text" id="m-${d.id}-exclude" data-meta="exclude" data-id="${d.id}" value="${esc(d.meta.exclude)}" placeholder="none" spellcheck="false"></td>
         </tr>`).join("")}
       </tbody></table></div>
       <span class="hint">Event: when the injection or stimulus happened, as mm:ss, or as a plain number in the time column's units (now ${esc(unit)}). Exclude: time ranges to drop in recording time, like 8:00-8:50, separated by commas.</span>
+      <div class="btn-row">
+        ${state.datasets.some((d) => !d.meta.group || !d.meta.subject) ? '<button type="button" class="btn btn-small" id="btn-fill-names" title="Session names like “Morphine 6792” become group Morphine, subject 6792">Fill group &amp; subject from names</button>' : ""}
+        <button type="button" class="btn btn-small" id="btn-paste-sessions" aria-expanded="false">Paste session details</button>
+      </div>
+      <div id="paste-sessions" class="paste-sessions" hidden>
+        <label for="sessions-text" class="field-label">Paste a table with columns such as Session, Group, Subject, Event and Exclude (copied from Excel works). Rows are matched by session name, or in order.</label>
+        <textarea id="sessions-text" class="data-text" rows="5" spellcheck="false" placeholder="Session&#9;Group&#9;Subject&#9;Event&#9;Exclude&#10;Morphine 6792&#9;Morphine&#9;6792&#9;19:42&#9;8:00-8:50"></textarea>
+        <div class="btn-row"><button type="button" class="btn btn-small btn-primary" id="btn-apply-sessions">Apply to sessions</button></div>
+      </div>
     </div>`;
   } else if (state.datasets.length > 1) {
     html += `<div class="ds-tabs">${state.datasets.map((d) => `<button type="button" class="ds-tab" data-select="${d.id}" aria-pressed="${d.id === state.active}">${esc(d.name)}${inspected[d.id]?.error ? ' <span class="err">!</span>' : ""}</button>`).join("")}</div>`;
@@ -1160,6 +1187,8 @@ function renderAll() {
 // ============================================================================
 function renderEmptyStage() {
   lastResult = null;
+  $("#figures").classList.remove("stale");
+  $("#results").classList.remove("stale");
   $("#error-box").hidden = true;
   $("#results").hidden = true;
   $("#command-form").hidden = true;
@@ -1184,15 +1213,21 @@ function renderResults(out) {
   const err = $("#error-box");
   if (out.error) {
     err.hidden = false;
-    err.innerHTML = `<b>Can't run this analysis yet.</b> ${esc(out.error)}`;
+    err.innerHTML = `<b>Can't run this analysis yet.</b> ${esc(out.error)}${lastResult ? '<br><span class="fine">Showing the last figure that worked.</span>' : ""}`;
     if (out.trace) console.error(out.trace);
-    $("#figures").innerHTML = "";
-    $("#results").hidden = true;
-    lastResult = null;
-    $("#command-form").hidden = true;
+    if (lastResult) {
+      $("#figures").classList.add("stale");
+      $("#results").classList.add("stale");
+    } else {
+      $("#figures").innerHTML = "";
+      $("#results").hidden = true;
+      $("#command-form").hidden = true;
+    }
     return;
   }
   err.hidden = true;
+  $("#figures").classList.remove("stale");
+  $("#results").classList.remove("stale");
   const r = out.ok;
   const firstResult = !lastResult;
   const groupsChanged = JSON.stringify(lastResult?.group_styles || null) !== JSON.stringify(r.group_styles || null);
@@ -1301,6 +1336,45 @@ function copyFigure(index) {
 function saveProject() {
   download(slug(state.name) + ".serpentine.json", JSON.stringify(state, null, 1), "application/json");
   toast("Project saved to your downloads");
+}
+
+// ============================================================================
+// Session helpers
+// ============================================================================
+// "Morphine 6792" → group Morphine, subject 6792; "Saline_M101" → Saline, M101
+function guessFromName(name) {
+  const parts = String(name || "").split(/[\s_\-·,]+/).filter(Boolean);
+  const isId = (w) => /\d/.test(w) && w.length <= 10;
+  const subject = parts.find(isId) || "";
+  const group = parts.filter((w) => !isId(w) && !/^(session|rec|recording|day|run|table|copy|block)$/i.test(w)).join(" ");
+  return { group, subject };
+}
+
+// Fill the sessions table from a pasted sheet (like a sessions.csv), matched by name or by order.
+function applySessionSheet(text) {
+  const lines = String(text || "").replace(/\r/g, "").split("\n").filter((l) => l.trim());
+  if (lines.length < 2) return 0;
+  const sep = lines[0].includes("\t") ? "\t" : lines[0].includes(";") ? ";" : ",";
+  const head = lines[0].split(sep).map((h) => h.trim().toLowerCase());
+  const col = (re) => head.findIndex((h) => re.test(h));
+  const idx = {
+    name: col(/^(session|name|table|recording|file|animal session)/),
+    group: col(/^(group|condition|treatment|drug)/),
+    subject: col(/^(subject|animal|mouse|rat|id|subject id)/),
+    event: col(/^(event|injection|inj|stimulus|time of injection|injection time)/),
+    exclude: col(/^(exclude|exclusions?|drop|remove)/),
+  };
+  if (idx.group < 0 && idx.subject < 0 && idx.event < 0 && idx.exclude < 0) return 0;
+  let n = 0;
+  lines.slice(1).forEach((line, i) => {
+    const cells = line.split(sep).map((c) => c.trim());
+    const byName = idx.name >= 0 ? state.datasets.find((d) => d.name.trim().toLowerCase() === (cells[idx.name] || "").toLowerCase()) : null;
+    const d = byName || (idx.name < 0 ? state.datasets[i] : null);
+    if (!d) return;
+    for (const k of ["group", "subject", "event", "exclude"]) if (idx[k] >= 0 && cells[idx[k]] !== undefined) d.meta[k] = cells[idx[k]];
+    n++;
+  });
+  return n;
 }
 
 // ============================================================================
@@ -1414,6 +1488,20 @@ function runCommand(text) {
   if (undid && !other.length) renderUndo();
 }
 
+function bindWelcome() {
+  $("#welcome").addEventListener("click", (e) => {
+    const go = e.target.closest("[data-welcome]");
+    if (!go) return;
+    store(WELCOME_KEY, true);
+    $("#welcome").hidden = true;
+    if (go.dataset.welcome === "data") {
+      state.step = "data";
+      renderSteps();
+      renderData();
+    }
+  });
+}
+
 function bindCommandBar() {
   const form = $("#command-form");
   const input = $("#command-input");
@@ -1477,6 +1565,7 @@ function bindEvents() {
 
   const pa = $("#panel-analysis");
   const pickAnalysis = (id) => {
+    if (state.example && state.example !== id) return loadExample(id);
     state.analysis = id;
     renderAnalysis();
     renderSettings();
@@ -1517,6 +1606,30 @@ function bindEvents() {
       state.active = t.closest("[data-select]").dataset.select;
       renderData();
       autosave();
+    } else if (t.closest("#btn-fill-names")) {
+      let filled = 0;
+      for (const d of state.datasets) {
+        const guess = guessFromName(d.name);
+        if (!d.meta.group && guess.group) { d.meta.group = guess.group; filled++; }
+        if (!d.meta.subject && guess.subject) { d.meta.subject = guess.subject; filled++; }
+      }
+      renderData();
+      changed({ clearExample: true });
+      toast(filled ? "Filled " + filled + " blank cell" + (filled > 1 ? "s" : "") + " from the session names" : "The names don't contain a recognizable group and subject.");
+    } else if (t.closest("#btn-paste-sessions")) {
+      const box = $("#paste-sessions");
+      box.hidden = !box.hidden;
+      t.closest("#btn-paste-sessions").setAttribute("aria-expanded", String(!box.hidden));
+      if (!box.hidden) $("#sessions-text").focus();
+    } else if (t.closest("#btn-apply-sessions")) {
+      const n = applySessionSheet($("#sessions-text").value);
+      if (n) {
+        renderData();
+        changed({ clearExample: true });
+        toast("Updated " + n + " session" + (n > 1 ? "s" : ""));
+      } else {
+        toast("Couldn't match any rows. Include a header row with Group, Subject, Event or Exclude.");
+      }
     } else if (t.closest("#btn-duplicate")) {
       const act = activeDataset();
       if (!act) return;
@@ -1557,6 +1670,7 @@ function bindEvents() {
       const d = state.datasets.find((x) => x.id === t.dataset.id);
       if (d) {
         d.meta[t.dataset.meta] = t.value;
+        if (t.dataset.meta === "event") t.classList.toggle("missing", !t.value.trim());
         changed({ clearExample: true });
       }
     }
@@ -1680,6 +1794,7 @@ function bindEvents() {
 // ============================================================================
 bindEvents();
 bindCommandBar();
+bindWelcome();
 if (!restore()) {
   state.analysis = "timecourse";
   queuedExample = "timecourse";
