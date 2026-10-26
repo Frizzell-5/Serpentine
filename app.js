@@ -894,7 +894,7 @@ const SETTINGS_SCHEMA = {
     return [
       sec("Columns"),
       row(col("time_col", "Time column", c.numeric), col("value_col", "Measurement", c.numeric)),
-      timeKind !== "time" && sel("time_unit", "Time column is in", [["seconds", "Seconds"], ["minutes", "Minutes"], ["hours", "Hours"]], { hint: "Clock times like 13:27 are read automatically." }),
+      timeKind !== "time" && sel("time_unit", "Time column is in", [["seconds", "Seconds"], ["minutes", "Minutes"], ["hours", "Hours"]], { hint: "Clock times like 10:30 are read automatically." }),
       sec("Clean the data"),
       row(num("valid_min", "Ignore values below"), num("valid_max", "Ignore values above")),
       col("filter_col", "Quality column", c.numeric, { none: true, hint: "Optional. Keep only rows where this column is in range, e.g. cycle count of at least 10." }),
@@ -909,11 +909,11 @@ const SETTINGS_SCHEMA = {
       sel("metric", "Summarize each session by", [["mean", "Mean in window"], ["min", "Minimum (nadir)"], ["max", "Maximum (peak)"], ["auc", "Net area under the curve"]]),
       row(num("endpoint_start", "From (min)"), num("endpoint_end", "To (min)")),
       sec("Statistics"),
-      tog("pair_subjects", "Pair sessions by subject", "The same animal appears in each group, e.g. saline day and drug day."),
+      tog("pair_subjects", "Pair sessions by subject", "The same subject appears in each group, e.g. a control visit and a treatment visit."),
       sel("test", "Test", TEST_OPTIONS),
       !s.pair_subjects && s.test !== "nonparam" && tog("equal_var", "Assume equal variances", "Off applies Welch's correction (recommended)."),
       sel("posthoc", "Multiple comparisons", POSTHOC_OPTIONS),
-      txt("group_order", "Group order", { placeholder: "e.g. Saline, Morphine" }),
+      txt("group_order", "Group order", { placeholder: "e.g. Control, Treated" }),
       sec("Time-course display"),
       row(sel("band", "Spread", [["sem", "Mean ± SEM"], ["sd", "Mean ± SD"], ["none", "None"]]), s.band !== "none" && seg("band_style", "Show as", [["band", "Band"], ["bars", "Error bars"]])),
       tog("show_traces", "Show each session as a thin line"),
@@ -1092,20 +1092,20 @@ function renderData() {
         <thead><tr><th>Session</th><th>Group</th><th>Subject</th><th>Event</th><th>Exclude</th></tr></thead><tbody>
         ${state.datasets.map((d) => `<tr class="${d.id === state.active ? "active" : ""}">
           <td><button type="button" data-select="${d.id}" title="${esc(d.name)}">${esc(d.name)}${inspected[d.id]?.error ? ' <span class="err">!</span>' : ""}</button></td>
-          <td><input type="text" id="m-${d.id}-group" data-meta="group" data-id="${d.id}" value="${esc(d.meta.group)}" placeholder="Saline" spellcheck="false"></td>
+          <td><input type="text" id="m-${d.id}-group" data-meta="group" data-id="${d.id}" value="${esc(d.meta.group)}" placeholder="Control" spellcheck="false"></td>
           <td><input type="text" id="m-${d.id}-subject" data-meta="subject" data-id="${d.id}" value="${esc(d.meta.subject)}" placeholder="M1" spellcheck="false"></td>
-          <td><input type="text" id="m-${d.id}-event" data-meta="event" data-id="${d.id}" value="${esc(d.meta.event)}" placeholder="13:27" spellcheck="false"${d.meta.event ? "" : ' class="missing" title="Add the injection or stimulus time"'}></td>
+          <td><input type="text" id="m-${d.id}-event" data-meta="event" data-id="${d.id}" value="${esc(d.meta.event)}" placeholder="10:30" spellcheck="false"${d.meta.event ? "" : ' class="missing" title="Add the injection or stimulus time"'}></td>
           <td><input type="text" id="m-${d.id}-exclude" data-meta="exclude" data-id="${d.id}" value="${esc(d.meta.exclude)}" placeholder="none" spellcheck="false"></td>
         </tr>`).join("")}
       </tbody></table></div>
       <span class="hint">Event: when the injection or stimulus happened, as mm:ss, or as a plain number in the time column's units (now ${esc(unit)}). Exclude: time ranges to drop in recording time, like 8:00-8:50, separated by commas.</span>
       <div class="btn-row">
-        ${state.datasets.some((d) => !d.meta.group || !d.meta.subject) ? '<button type="button" class="btn btn-small" id="btn-fill-names" title="Session names like “Morphine 6792” become group Morphine, subject 6792">Fill group &amp; subject from names</button>' : ""}
+        ${state.datasets.some((d) => !d.meta.group || !d.meta.subject) ? '<button type="button" class="btn btn-small" id="btn-fill-names" title="Session names like “Treated 07” become group Treated, subject 07">Fill group &amp; subject from names</button>' : ""}
         <button type="button" class="btn btn-small" id="btn-paste-sessions" aria-expanded="false">Paste session details</button>
       </div>
       <div id="paste-sessions" class="paste-sessions" hidden>
         <label for="sessions-text" class="field-label">Paste a table with columns such as Session, Group, Subject, Event and Exclude (copied from Excel works). Rows are matched by session name, or in order.</label>
-        <textarea id="sessions-text" class="data-text" rows="5" spellcheck="false" placeholder="Session&#9;Group&#9;Subject&#9;Event&#9;Exclude&#10;Morphine 6792&#9;Morphine&#9;6792&#9;19:42&#9;8:00-8:50"></textarea>
+        <textarea id="sessions-text" class="data-text" rows="5" spellcheck="false" placeholder="Session&#9;Group&#9;Subject&#9;Event&#9;Exclude&#10;Treated 07&#9;Treated&#9;07&#9;10:30&#9;4:00-4:20"></textarea>
         <div class="btn-row"><button type="button" class="btn btn-small btn-primary" id="btn-apply-sessions">Apply to sessions</button></div>
       </div>
     </div>`;
@@ -1341,7 +1341,7 @@ function saveProject() {
 // ============================================================================
 // Session helpers
 // ============================================================================
-// "Morphine 6792" → group Morphine, subject 6792; "Saline_M101" → Saline, M101
+// "Treated 07" → group Treated, subject 07; "Control_P01" → Control, P01
 function guessFromName(name) {
   const parts = String(name || "").split(/[\s_\-·,]+/).filter(Boolean);
   const isId = (w) => /\d/.test(w) && w.length <= 10;
@@ -1394,7 +1394,7 @@ let commandIndex = 0;
 
 const COMMAND_HELP = [
   ["Gridlines & legend", ["remove gridlines", "dashed horizontal gridlines", "hide the legend", "legend at the top left"]],
-  ["Groups", ["make Saline red", "rename Saline to Control", "square markers for Morphine", "striped bars for Vehicle"]],
+  ["Groups", ["make Control red", "rename Control to Vehicle", "square markers for Treated", "striped bars for Control"]],
   ["Plot type", ["make it a violin plot", "horizontal", "solid bars", "wider bars", "hide the points"]],
   ["Colors", ["use viridis", "colorblind friendly colors", "reverse the colors", "dark background", "make the text white"]],
   ["Text", ["title Day 21", "y axis label Volume (mm³)", "font size 12", "use Lato", "bold axis labels", "panel letter B"]],
@@ -1402,11 +1402,11 @@ const COMMAND_HELP = [
   ["Stats marks", ["show exact p values", "hide the stars", "show n under each group", "use SD", "no caps on error bars"]],
   ["Size & more", ["6 by 4 inches", "89 mm wide", "make it bigger", "landscape", "reference line at 100", "fewer ticks"]],
   ["Overall look", ["make it look professional", "make it playful", "for my presentation", "make it look modern", "make everything bigger", "warmer colors"]],
-  ["Group order & shades", ["put Morphine first", "reverse the group order", "swap the colors", "make Saline lighter", "italicize the group names"]],
+  ["Group order & shades", ["put Treated first", "reverse the group order", "swap the colors", "make Control lighter", "italicize the group names"]],
   ["Actions", ["export as pdf", "copy the figure", "save my project", "undo", "redo"]],
 ];
 const ANALYSIS_HELP = {
-  timecourse: ["Time course", ["baseline from -2 to 0", "endpoint 25 to 30", "10 second bins", "percent of baseline", "use the nadir", "pair by subject", "rename the injection to Morphine"]],
+  timecourse: ["Time course", ["baseline from -2 to 0", "endpoint 25 to 30", "10 second bins", "percent of baseline", "use the nadir", "pair by subject", "rename the event to Drink"]],
   compare: ["Statistics", ["percent of control", "paired", "use a nonparametric test", "compare everything to the control", "all pairwise comparisons"]],
   correlation: ["Statistics", ["use spearman", "hide the fit line", "remove the confidence band"]],
   dose: ["Curve fit", ["fix the bottom at 0", "fix top at 100", "call it IC50", "show every replicate"]],

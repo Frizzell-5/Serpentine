@@ -30,7 +30,7 @@ from scipy.optimize import curve_fit  # noqa: E402
 
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
-ENGINE_VERSION = "0.5.0"
+ENGINE_VERSION = "0.5.1"
 
 
 class UserError(Exception):
@@ -1415,7 +1415,7 @@ def _parse_clock_value(text, mult):
     try:
         return float(t) * mult
     except ValueError:
-        raise UserError('Couldn\'t read the time "%s". Use mm:ss (e.g. 13:27) or a number.' % t)
+        raise UserError('Couldn\'t read the time "%s". Use mm:ss (e.g. 10:30) or a number.' % t)
 
 
 def _parse_ranges(text, mult):
@@ -2069,33 +2069,37 @@ def example(kind):
             "settings": {"layout": "wide", "test": "auto", "posthoc": "all", "y_name": "Tumor volume (mm³)"},
         }
     if kind == "timecourse":
+        # Heart rate in four volunteers after drinking water or an energy drink (same people, two visits)
         datasets = []
-        for group, mean_drop in (("Saline", 0.0), ("Morphine", 0.40)):
+        for group, mean_rise in (("Water", 0.0), ("Energy drink", 0.16)):
             for m in range(4):
-                drop = max(0.0, mean_drop + rng.normal(0, 0.09)) if mean_drop else rng.normal(0, 0.05)
-                mouse = "M%d" % (101 + m)
-                inj = 600 + int(rng.integers(-90, 120))
-                base_vi = rng.normal(48, 5)
-                base_rate = rng.normal(190, 15)
+                rise = max(0.0, mean_rise + rng.normal(0, 0.04)) if mean_rise else rng.normal(0, 0.015)
+                person = "P%02d" % (m + 1)
+                drink = 600 + int(rng.integers(-90, 120))
+                base_hr = rng.normal(68, 6)
+                base_temp = rng.normal(33.2, 0.4)
                 rows = []
-                for t in range(0, inj + 30 * 60 + 1, 10):
-                    after = max(0.0, (t - inj) / 60.0)
-                    effect = drop * (1 - math.exp(-after / 4.0)) * (1 - 0.15 * after / 30.0)
-                    vi = base_vi * (1 - effect) * (1 + rng.normal(0, 0.05))
-                    rate = base_rate * (1 - effect * 0.35) * (1 + rng.normal(0, 0.04)) - 0.25 * t / 60.0
-                    count = int(max(0, rate / 6 + rng.normal(0, 2)))
-                    rows.append([_fmt_clock(t), "%.2f" % vi, "%.1f" % rate, count])
+                for t in range(0, drink + 30 * 60 + 1, 10):
+                    after = max(0.0, (t - drink) / 60.0)
+                    effect = rise * (1 - math.exp(-after / 9.0))
+                    hr = base_hr * (1 + effect) * (1 + rng.normal(0, 0.03))
+                    temp = base_temp + 0.4 * effect + rng.normal(0, 0.05)
+                    quality = int(min(100, max(0, rng.normal(94, 4))))
+                    if rng.random() < 0.03:  # brief sensor dropouts the quality filter removes
+                        quality = int(rng.integers(20, 60))
+                        hr = hr * rng.uniform(0.4, 1.8)
+                    rows.append([_fmt_clock(t), "%.1f" % hr, "%.2f" % temp, quality])
                 datasets.append({
-                    "name": "%s %s" % (group, mouse),
-                    "text": _tsv(["Time", "Minute ventilation (mL/min)", "Breathing rate (BPM)", "Cycle count"], rows),
-                    "meta": {"group": group, "subject": mouse, "event": _fmt_clock(inj), "exclude": ""},
+                    "name": "%s %s" % (group, person),
+                    "text": _tsv(["Time", "Heart rate (BPM)", "Skin temperature (°C)", "Signal quality (%)"], rows),
+                    "meta": {"group": group, "subject": person, "event": _fmt_clock(drink), "exclude": ""},
                 })
         return {"datasets": datasets,
-                "settings": {"time_col": "Time", "value_col": "Minute ventilation (mL/min)", "bin": 60,
+                "settings": {"time_col": "Time", "value_col": "Heart rate (BPM)", "bin": 60,
                              "baseline_start": -5, "baseline_end": 0, "window_start": -8, "window_end": 30,
                              "endpoint_start": 25, "endpoint_end": 30, "norm": "pct", "metric": "mean",
-                             "pair_subjects": True, "event_label": "Injection", "filter_col": "Cycle count",
-                             "filter_min": 10}}
+                             "pair_subjects": True, "event_label": "Drink", "filter_col": "Signal quality (%)",
+                             "filter_min": 80}}
     if kind == "correlation":
         rows = []
         for g, slope in (("Wild type", 2.1), ("Knockout", 3.4)):

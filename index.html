@@ -258,8 +258,8 @@ footer .sp { margin-left: auto; }
         <span class="cta-note">No sign-up · No install · Try the built-in examples</span>
       </div>
       <figure class="plate rise d4">
-        <div class="plate-bar" aria-hidden="true"><i></i><i></i><i></i><span>Serpentine · time course around an injection</span></div>
-        <img src="docs/screenshot.png" width="2880" height="1720" alt="Serpentine showing ventilation recordings from saline and morphine sessions aligned to the injection, with a time-course plot, an endpoint bar chart, a paired t-test result and a sessions table.">
+        <div class="plate-bar" aria-hidden="true"><i></i><i></i><i></i><span>Serpentine · time course around an event</span></div>
+        <img src="docs/screenshot.png" width="2880" height="1720" alt="Serpentine showing heart-rate recordings after water or an energy drink, aligned to the drink, with a time-course plot, an endpoint bar chart, a paired t-test result and the Style controls.">
       </figure>
     </div>
   </section>
@@ -302,13 +302,13 @@ footer .sp { margin-left: auto; }
       <div class="gallery">
         <figure class="card">
           <div class="imgs two">
-            <img src="docs/img/g-timecourse.png" alt="Minute ventilation as percent of baseline over time for saline and morphine groups, with individual sessions and a shaded SEM band.">
-            <img src="docs/img/g-endpoint.png" alt="Endpoint bar chart comparing saline and morphine with paired lines between sessions from the same mouse.">
+            <img src="docs/img/g-timecourse.png" alt="Heart rate as percent of baseline over time after water or an energy drink, with individual sessions and a shaded SEM band.">
+            <img src="docs/img/g-endpoint.png" alt="Endpoint plot comparing water and energy drink with paired lines between visits from the same volunteer.">
           </div>
           <h3>Time course around an event</h3>
           <p>For recordings aligned to an injection, stimulus or treatment. Serpentine bins the data, normalizes each session to its own baseline, removes the stretches you exclude, averages by group and tests an endpoint window.</p>
-          <div class="tags"><span>plethysmography</span><span>telemetry</span><span>% of baseline</span><span>net AUC</span><span>paired by subject</span></div>
-          <figcaption><span class="figlabel">Fig. 2 |</span> Minute ventilation after saline or morphine in the same four mice, 25 to 30 min endpoint, paired t-test.</figcaption>
+          <div class="tags"><span>heart rate</span><span>telemetry</span><span>imaging</span><span>% of baseline</span><span>net AUC</span><span>paired by subject</span></div>
+          <figcaption><span class="figlabel">Fig. 2 |</span> Heart rate after water or an energy drink in the same four volunteers, 25 to 30 min endpoint, paired t-test.</figcaption>
         </figure>
         <figure class="card">
           <div class="imgs"><img src="docs/img/g-compare.png" alt="Raincloud plot of tumor volume for vehicle and two drug doses, with significance brackets."></div>
@@ -361,7 +361,7 @@ footer .sp { margin-left: auto; }
         <div><h3>Any color scheme</h3><p>Ten curated palettes, colorblind-safe options, every matplotlib colormap, or your own hex codes and backgrounds.</p></div>
         <div><h3>Real typefaces</h3><p>Built-in sans, serif and mono, plus nine web fonts that come through exactly in PNG and PDF exports.</p></div>
         <div><h3>Axes and annotations</h3><p>Choose which axis lines to draw, offset and trim them, set ticks, log scales and limits, and add reference lines, panel letters and exact p-values.</p></div>
-        <div><h3>Just say it</h3><p>Type “remove gridlines and make Saline navy” and the figure changes. Plain-English commands cover colors, labels, axes, plot types, sizes and more.</p></div>
+        <div><h3>Just say it</h3><p>Type “remove gridlines and make Water navy” and the figure changes. Plain-English commands cover colors, labels, axes, plot types, sizes and more.</p></div>
         <div><h3>Write Python if you want</h3><p>An optional box runs your own matplotlib code on the figure, and raw rcParams settings are one line each. No limits.</p></div>
       </div>
     </div>
@@ -393,7 +393,7 @@ footer .sp { margin-left: auto; }
         <div class="feature">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg>
           <h3>Reads real lab exports</h3>
-          <p>LabChart Data Pads, Excel ranges, Prism tables, CSV and TSV. It handles multi-row headers, clock times like 13:27, blank cells and decimal commas.</p>
+          <p>LabChart Data Pads, Excel ranges, Prism tables, CSV and TSV. It handles multi-row headers, clock times like 10:30, blank cells and decimal commas.</p>
         </div>
         <div class="feature">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.5 5.5L20 9l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-.5z"/></svg>
@@ -505,9 +505,9 @@ M2      KO         29.4
             <div class="tbl"><table>
               <thead><tr><th>Field</th><th>What to enter</th><th>Example</th></tr></thead>
               <tbody>
-                <tr><td>Group</td><td>The condition this session belongs to.</td><td><code>Morphine</code></td></tr>
+                <tr><td>Group</td><td>The condition this session belongs to.</td><td><code>Treated</code></td></tr>
                 <tr><td>Subject</td><td>The animal or participant. Used to pair sessions from the same subject.</td><td><code>M101</code></td></tr>
-                <tr><td>Event</td><td>When the injection or stimulus happened, in recording time. Use mm:ss, h:mm:ss or seconds.</td><td><code>13:27</code></td></tr>
+                <tr><td>Event</td><td>When the injection or stimulus happened, in recording time. Use mm:ss, h:mm:ss or seconds.</td><td><code>10:30</code></td></tr>
                 <tr><td>Exclude</td><td>Time ranges to drop, such as a loose wire or movement. Separate several ranges with commas.</td><td><code>8:00-8:50, 21:10-22:00</code></td></tr>
               </tbody>
             </table></div>
@@ -515,7 +515,7 @@ M2      KO         29.4
             <p>Turn on <strong>Pair sessions by subject</strong> when the same animals were recorded under each condition, so Serpentine uses a paired test.</p>
             <h4>Filling in the sessions table quickly</h4>
             <ul>
-              <li><strong>Fill group &amp; subject from names:</strong> name your tables like <code>Morphine 6792</code> or <code>Saline_M101</code> and one click fills in the group and subject.</li>
+              <li><strong>Fill group &amp; subject from names:</strong> name your tables like <code>Treated 07</code> or <code>Control_P01</code> and one click fills in the group and subject.</li>
               <li><strong>Paste session details:</strong> paste a small sheet from Excel with columns such as <code>Session</code>, <code>Group</code>, <code>Subject</code>, <code>Event</code> and <code>Exclude</code>. Rows are matched by session name (or in order if there's no Session column).</li>
               <li>Sessions still missing an event time are highlighted.</li>
             </ul>
@@ -551,8 +551,8 @@ M2      KO         29.4
               <li><strong>Size:</strong> width and height in inches with millimetres shown. Journal style fits a single 89&nbsp;mm column.</li>
             </ul>
             <h4>Plain-English commands</h4>
-            <p>Above your figure is a command bar. Type what you want and press Enter, for example <code>remove gridlines</code>, <code>make Saline navy and Morphine coral</code>, <code>horizontal violin plot</code>, <code>y axis from 0 to 1000</code> or <code>title Day 21</code>. Combine several with “and” or commas. Serpentine shows exactly what it changed, and <strong>What can I say?</strong> lists the kinds of commands it understands. It runs on your computer, so it's instant and private. Press <kbd>↑</kbd> to bring back an earlier command.</p>
-            <p>Commands also reach the analysis itself and a few actions: <code>baseline from -2 to 0</code>, <code>10 second bins</code>, <code>use the nadir</code>, <code>percent of control</code>, <code>use a nonparametric test</code>, <code>put Morphine first</code>, <code>export as pdf</code>. Describe a feel, like <code>make it look professional</code> or <code>for my presentation</code>, and it picks a matching style. Small typos are corrected, and when it can't tell what you meant it suggests the closest commands.</p>
+            <p>Above your figure is a command bar. Type what you want and press Enter, for example <code>remove gridlines</code>, <code>make Water navy and Energy drink coral</code>, <code>horizontal violin plot</code>, <code>y axis from 0 to 1000</code> or <code>title Day 21</code>. Combine several with “and” or commas. Serpentine shows exactly what it changed, and <strong>What can I say?</strong> lists the kinds of commands it understands. It runs on your computer, so it's instant and private. Press <kbd>↑</kbd> to bring back an earlier command.</p>
+            <p>Commands also reach the analysis itself and a few actions: <code>baseline from -2 to 0</code>, <code>10 second bins</code>, <code>use the nadir</code>, <code>percent of control</code>, <code>use a nonparametric test</code>, <code>put Energy drink first</code>, <code>export as pdf</code>. Describe a feel, like <code>make it look professional</code> or <code>for my presentation</code>, and it picks a matching style. Small typos are corrected, and when it can't tell what you meant it suggests the closest commands.</p>
             <h4>Your own styles</h4>
             <p>Name the current look and press <strong>Save style</strong> to reuse it in any project. <strong>Export style file</strong> saves it as a file that colleagues can import, so a lab can share one house style.</p>
             <h4>Advanced: Python</h4>
@@ -581,7 +581,7 @@ M2      KO         29.4
               <li><strong>Stuck on “Starting Python”.</strong> Serpentine needs an internet connection to load the Python engine the first time. Check your connection and reload.</li>
               <li><strong>A column reads as text.</strong> Usually a stray word inside the numbers. Values with units attached, such as <code>48.2 mL/min</code>, are read as numbers automatically.</li>
               <li><strong>“Time jumps back” note.</strong> A new LabChart block restarted the clock at 0:00. Serpentine keeps the first block; paste later blocks as their own session if you need them.</li>
-              <li><strong>“Couldn't read the time”.</strong> Write event and exclusion times as <code>13:27</code>, <code>0:13:27</code> or plain seconds like <code>807</code>.</li>
+              <li><strong>“Couldn't read the time”.</strong> Write event and exclusion times as <code>10:30</code>, <code>0:10:30</code> or plain seconds like <code>630</code>.</li>
               <li><strong>The downloaded copy shows a blank page.</strong> Start it with the launcher file rather than opening <code>app.html</code> directly, because browsers block the Python engine on pages opened from disk.</li>
             </ul>
           </article>

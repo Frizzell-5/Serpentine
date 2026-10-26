@@ -1,5 +1,5 @@
 "use strict";
-// Plain-English figure commands ("remove gridlines", "make Saline red") turned into style settings.
+// Plain-English figure commands ("remove gridlines", "make Control red") turned into style settings.
 // Runs entirely in the browser. `interpretCommand(text, ctx)` edits ctx.style / ctx.settings in place
 // and returns what it changed and which parts it couldn't understand.
 (function (global) {
@@ -603,7 +603,7 @@
         }
       }
 
-      // ---- Per-group styling (a clause can name several groups: "Saline blue and Morphine red")
+      // ---- Per-group styling (a clause can name several groups: "Control blue and Treated red")
       const named = [];
       for (const g of groups) {
         let at = -1, len = 0;

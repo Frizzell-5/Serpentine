@@ -12,9 +12,9 @@ Serpentine is a browser-based analysis tool for researchers. You paste or upload
 
 - **No code.** Every analysis decision is a menu, toggle or number field. The figure updates as you change them.
 - **Complete control over the figure.** Ten plot types, vertical or horizontal; per-group colors, markers, hatch patterns and line styles; any matplotlib colormap; twelve fonts; every axis line, tick and gridline; reference lines, panel letters and legends. Twelve quick styles to start from, your own saved styles, and shareable style files for a lab house style.
-- **Plain-English commands.** Type “remove gridlines and make Saline navy”, “baseline from -2 to 0”, “make it look professional” or “export as pdf” into the command bar. Hundreds of phrasings, typo correction and suggestions. Runs locally: instant, free and private.
+- **Plain-English commands.** Type “remove gridlines and make Control navy”, “baseline from -2 to 0”, “make it look professional” or “export as pdf” into the command bar. Hundreds of phrasings, typo correction and suggestions. Runs locally: instant, free and private.
 - **Python when you want it.** An optional box runs your own matplotlib code on each figure, and raw rcParams settings take one line each.
-- **Built for real lab data.** It reads tables pasted from LabChart Data Pads, Excel and Prism, including multi-row headers, clock times (`13:27`) and European decimal commas.
+- **Built for real lab data.** It reads tables pasted from LabChart Data Pads, Excel and Prism, including multi-row headers, clock times (`10:30`) and European decimal commas.
 - **Private by design.** All computation runs locally in your browser through [Pyodide](https://pyodide.org). Nothing is uploaded to a server.
 - **Reproducible.** Every analysis can be downloaded as a standalone Python script that recreates the same statistics and figures, for lab records, reviewers or further customization.
 
