@@ -98,7 +98,7 @@ python3 -m venv .venv && .venv/bin/pip install numpy scipy pandas matplotlib ope
 
 ## Status
 
-Serpentine is in early development (v0.5). Results should be checked against your own understanding of the statistics before publication; the generated methods text is a starting point, not a substitute for describing what you did.
+Serpentine is in early development (v0.6). Results should be checked against your own understanding of the statistics before publication; the generated methods text is a starting point, not a substitute for describing what you did.
 
 ## Author
 

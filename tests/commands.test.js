@@ -10,7 +10,7 @@ function run(cmd, check, opts={}) {
   const style = {grid:"none", legend:"best", groups:{}, palette:"serpentine", ...(opts.style||{})};
   const settings = {band:"sem", ...(opts.settings||{})};
   let preset=null, undone=false, reset=false, action=null, redone=false;
-  const res = interpretCommand(cmd, {style, settings, analysis: opts.analysis||"compare", groups: opts.groups||groups, colormaps: CMAPS, parseColor,
+  const res = interpretCommand(cmd, {style, settings, analysis: opts.analysis||"compare", groups: opts.groups||groups, columns: opts.columns||[], colormaps: CMAPS, parseColor,
     applyPreset:(n)=>{preset=n; return true;}, undo:()=>{undone=true;}, resetStyle:()=>{reset=true;}, redo:()=>{redone=true;}, action:(n,a)=>{action=n+(a?":"+a:"");}});
   let ok; try { ok = check(style, {res, preset, undone, reset, settings, action, redone}); } catch(e) { ok=false; }
   if (ok) pass++; else { fail++; console.log("FAIL:", JSON.stringify(cmd), "\n   changes:", res.changes, "\n   unknown:", res.unknown, "\n   style:", JSON.stringify(Object.fromEntries(Object.entries(style).filter(([k,v])=>!["legend","palette"].includes(k)||v!=={legend:"best",palette:"serpentine"}[k])))); }
@@ -295,5 +295,25 @@ run("use virdis", s=>s.palette==="cmap:viridis");
 run("make Salinee red", s=>G(s,"Saline").color==="#ff0000");
 run("title Gridlnes are fun", s=>s.title==="Gridlnes are fun");
 run("ticks insde", s=>s.tick_dir==="in");
+
+// column choices
+const LC = [{name:"Time (s)",kind:"number"},{name:"Cyclic Height (V)",kind:"number"},{name:"Cyclic Rate (BPM)",kind:"number"},{name:"Cycle Count",kind:"number"},{name:"Comment",kind:"text"}];
+const TCC = {analysis:"timecourse", columns: LC, settings:{filter_col:"", time_col:"", value_col:""}};
+run("use Cyclic Height", (s,x)=>x.settings.value_col==="Cyclic Height (V)", TCC);
+run("plot the cyclic rate instead", (s,x)=>x.settings.value_col==="Cyclic Rate (BPM)", TCC);
+run("quality column cycle count at least 10", (s,x)=>x.settings.filter_col==="Cycle Count" && x.settings.filter_min==="10", TCC);
+run("filter cycle count above 12", (s,x)=>x.settings.filter_col==="Cycle Count" && x.settings.filter_min==="12", TCC);
+run("remove the quality filter", (s,x)=>x.settings.filter_col==="", {analysis:"timecourse", columns: LC, settings:{filter_col:"Cycle Count"}});
+run("time column is Time", (s,x)=>x.settings.time_col==="Time (s)", TCC);
+run("use viridis", (s,x)=>s.palette==="cmap:viridis" && !x.settings.value_col, TCC);
+const CC = [{name:"Genotype",kind:"text"},{name:"Body weight (g)",kind:"number"},{name:"Fasting glucose (mg/dL)",kind:"number"}];
+run("plot glucose against body weight", (s,x)=>x.settings.y_col==="Fasting glucose (mg/dL)" && x.settings.x_col==="Body weight (g)", {analysis:"correlation", columns: CC});
+run("color by genotype", (s,x)=>x.settings.group_col==="Genotype", {analysis:"correlation", columns: CC});
+run("weight on the x axis", (s,x)=>x.settings.x_col==="Body weight (g)", {analysis:"correlation", columns: CC});
+run("group by genotype", (s,x)=>x.settings.group_col==="Genotype" && x.settings.layout==="long", {analysis:"compare", columns: CC, settings:{layout:"wide"}});
+run("values from fasting glucose", (s,x)=>x.settings.value_col==="Fasting glucose (mg/dL)", {analysis:"compare", columns: CC, settings:{layout:"long"}});
+const WC = [{name:"Vehicle",kind:"number"},{name:"Drug 10 mg/kg",kind:"number"},{name:"Drug 30 mg/kg",kind:"number"}];
+run("only vehicle and drug 30", (s,x)=>JSON.stringify(x.settings.columns)==='["Vehicle","Drug 30 mg/kg"]', {analysis:"compare", columns: WC, groups: groups3, settings:{layout:"wide"}});
+run("use all columns", (s,x)=>Array.isArray(x.settings.columns) && x.settings.columns.length===0, {analysis:"compare", columns: WC, settings:{layout:"wide", columns:["Vehicle"]}});
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -108,7 +108,7 @@ function armConfirm(btn, question, action) {
 // Defaults
 // ============================================================================
 const DEFAULT_SETTINGS = {
-  compare: { dataset: "", layout: "wide", columns: [], value_col: "", group_col: "", group_order: "", y_name: "", normalize: "none", paired: false, test: "auto", equal_var: false, posthoc: "all" },
+  compare: { dataset: "", layout: "wide", columns: [], value_col: "", group_col: "", group_order: "", y_name: "", normalize: "none", combine_headings: true, paired: false, test: "auto", equal_var: false, posthoc: "all" },
   timecourse: {
     time_col: "", time_unit: "seconds", value_col: "", valid_min: "", valid_max: "", filter_col: "", filter_min: "", filter_max: "",
     bin: 30, baseline_start: -5, baseline_end: 0, window_start: -10, window_end: 30, event_label: "Injection", norm: "pct",
@@ -877,6 +877,7 @@ const SETTINGS_SCHEMA = {
       datasetField(),
       seg("layout", "Table layout", [["wide", "One column per group"], ["long", "Values + group column"]]),
       s.layout !== "long" && cols("columns", "Groups to include", c.numeric, "Leave all unchecked to use every numeric column."),
+      s.layout !== "long" && c.numeric.some((n) => n.includes(" · ")) && tog("combine_headings", "Combine columns under the same heading", "For Prism-style tables where each group has several replicate columns."),
       s.layout === "long" && row(col("value_col", "Value column", c.numeric), col("group_col", "Group column", c.all)),
       txt("group_order", "Group order", { placeholder: "e.g. Control, Low, High", hint: "Optional. Groups you leave out keep their table order." }),
       txt("y_name", "Measurement name", { placeholder: "e.g. Tumor volume (mm³)", hint: "Becomes the value-axis label." }),
@@ -1094,7 +1095,7 @@ function renderData() {
           <td><button type="button" data-select="${d.id}" title="${esc(d.name)}">${esc(d.name)}${inspected[d.id]?.error ? ' <span class="err">!</span>' : ""}</button></td>
           <td><input type="text" id="m-${d.id}-group" data-meta="group" data-id="${d.id}" value="${esc(d.meta.group)}" placeholder="Control" spellcheck="false"></td>
           <td><input type="text" id="m-${d.id}-subject" data-meta="subject" data-id="${d.id}" value="${esc(d.meta.subject)}" placeholder="M1" spellcheck="false"></td>
-          <td><input type="text" id="m-${d.id}-event" data-meta="event" data-id="${d.id}" value="${esc(d.meta.event)}" placeholder="10:30" spellcheck="false"${d.meta.event ? "" : ' class="missing" title="Add the injection or stimulus time"'}></td>
+          <td><input type="text" id="m-${d.id}-event" data-meta="event" data-id="${d.id}" value="${esc(d.meta.event)}" placeholder="${esc(lastResult?.events?.[d.id] ? lastResult.events[d.id] + " (comment)" : "10:30")}" spellcheck="false"${d.meta.event || lastResult?.events?.[d.id] ? (lastResult?.events?.[d.id] && !d.meta.event ? ' title="Taken from the comment in this recording. Type a time to override it."' : "") : ' class="missing" title="Add the injection or stimulus time, or mark it in a comment column"'}></td>
           <td><input type="text" id="m-${d.id}-exclude" data-meta="exclude" data-id="${d.id}" value="${esc(d.meta.exclude)}" placeholder="none" spellcheck="false"></td>
         </tr>`).join("")}
       </tbody></table></div>
@@ -1123,8 +1124,18 @@ function renderData() {
       <div class="btn-row"><button type="button" class="btn btn-small" id="btn-duplicate">Duplicate</button><button type="button" class="btn btn-small btn-danger" id="btn-delete">Delete this table</button></div>
     </div>`;
   }
+  // Keep the field you're typing in (and its cursor) when the panel redraws
+  const focusId = document.activeElement && p.contains(document.activeElement) ? document.activeElement.id : null;
+  const sel = focusId ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
   p.innerHTML = html;
   renderDataPreview();
+  if (focusId) {
+    const el = document.getElementById(focusId);
+    if (el) {
+      el.focus();
+      try { if (sel && el.setSelectionRange) el.setSelectionRange(sel[0], sel[1]); } catch (e) { /* not a text field */ }
+    }
+  }
 }
 
 function renderDataPreview() {
@@ -1231,8 +1242,10 @@ function renderResults(out) {
   const r = out.ok;
   const firstResult = !lastResult;
   const groupsChanged = JSON.stringify(lastResult?.group_styles || null) !== JSON.stringify(r.group_styles || null);
+  const eventsChanged = JSON.stringify(lastResult?.events || {}) !== JSON.stringify(r.events || {});
   lastResult = r;
   if (groupsChanged && state.step === "style") renderStyle();
+  if (eventsChanged && state.step === "data" && state.analysis === "timecourse" && !(document.activeElement && document.activeElement.dataset && document.activeElement.dataset.meta)) renderData();
   $("#figures").innerHTML = r.figures.map((f, i) => `
     <figure class="figure-card" style="margin:0">
       <div class="figure-head"><h3>${esc(f.title)}</h3>
@@ -1406,9 +1419,9 @@ const COMMAND_HELP = [
   ["Actions", ["export as pdf", "copy the figure", "save my project", "undo", "redo"]],
 ];
 const ANALYSIS_HELP = {
-  timecourse: ["Time course", ["baseline from -2 to 0", "endpoint 25 to 30", "10 second bins", "percent of baseline", "use the nadir", "pair by subject", "rename the event to Drink"]],
-  compare: ["Statistics", ["percent of control", "paired", "use a nonparametric test", "compare everything to the control", "all pairwise comparisons"]],
-  correlation: ["Statistics", ["use spearman", "hide the fit line", "remove the confidence band"]],
+  timecourse: ["Time course", ["use heart rate", "quality column signal quality at least 80", "baseline from -2 to 0", "endpoint 25 to 30", "10 second bins", "percent of baseline", "use the nadir", "pair by subject", "rename the event to Drink"]],
+  compare: ["Statistics", ["percent of control", "paired", "use a nonparametric test", "compare everything to the control", "all pairwise comparisons", "group by genotype", "only Control and Treated"]],
+  correlation: ["Statistics", ["plot glucose against weight", "color by genotype", "use spearman", "hide the fit line", "remove the confidence band"]],
   dose: ["Curve fit", ["fix the bottom at 0", "fix top at 100", "call it IC50", "show every replicate"]],
 };
 
@@ -1441,6 +1454,11 @@ function runCommand(text) {
     settings,
     analysis: state.analysis,
     groups: lastResult?.group_styles || [],
+    columns: (() => {
+      const id = state.analysis === "timecourse" ? state.datasets[0]?.id : (settings.dataset || state.datasets[0]?.id);
+      const d = state.datasets.find((x) => x.id === id) || state.datasets[0];
+      return (d && inspected[d.id]?.columns) || [];
+    })(),
     colormaps: COLORMAPS.flatMap(([, list]) => list),
     parseColor,
     applyPreset: (name) => {
@@ -1703,7 +1721,9 @@ function bindEvents() {
     renderData();
     scheduleInspect(d.id, 10);
     changed({ run: false, clearExample: true });
-    toast("Pasted into " + d.name);
+    const nameField = $("#ds-name");
+    if (nameField) { nameField.focus(); nameField.select(); }
+    toast("Pasted. Type a name for this table, e.g. Treated 07");
   });
 
   bindForm($("#panel-settings"), () => state.settings[state.analysis], renderSettings);

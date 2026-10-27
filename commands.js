@@ -191,6 +191,24 @@
     return null;
   }
 
+  // Match a column the user names ("cyclic height" → "Cyclic Height (V)"), ignoring units in brackets.
+  function findColumn(text, columns) {
+    const lc = " " + String(text).toLowerCase() + " ";
+    let best = null;
+    for (const col of columns) {
+      const full = col.name.toLowerCase();
+      const bare = full.replace(/\s*\([^)]*\)\s*$/, "").trim();
+      for (const n of [full, bare]) if (n && lc.includes(n) && (!best || n.length > best.len)) best = { col, len: n.length, text: n };
+    }
+    if (best) return best;
+    const words = lc.split(/[^a-z0-9µ%.]+/).filter((w) => (w.length >= 3 || /\d/.test(w)) && !STOP.has(w));
+    const scored = columns.map((col) => {
+      const cw = col.name.toLowerCase().split(/[^a-z0-9µ%.]+/).filter((w) => w.length >= 3 || /\d/.test(w));
+      return { col, score: words.filter((w) => cw.some((x) => x === w || (w.length >= 4 && x.startsWith(w)))).length };
+    }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score);
+    return scored.length && (scored.length === 1 || scored[0].score > scored[1].score) ? { col: scored[0].col, len: 0, text: "" } : null;
+  }
+
   function findColor(text, parseColor) {
     const hex = text.match(/#[0-9a-f]{6}\b|#[0-9a-f]{3}\b/i);
     if (hex) return { hex: hex[0], name: hex[0] };
@@ -230,6 +248,7 @@
     let lastMode = null;
     const VERB_START = /^(make|set|use|add|remove|hide|show|change|turn|put|rename|relabel|give|colou?r|switch|increase|decrease|no|call|move|apply|start|rotate|tilt|label|draw|flip|bold|get|drop|delete|reverse|export|download|copy|save|swap|order|reorder|fix|display|include|bring|undo|redo|reset|italic)/i;
     const protect = new Set(groups.flatMap((g) => String(g.name + " " + g.label).toLowerCase().split(/[^a-z]+/)).filter(Boolean));
+    for (const col of ctx.columns || []) for (const w of col.name.toLowerCase().split(/[^a-z]+/)) if (w) protect.add(w);
     // Colour names (coral, salmon, khaki…) are words too
     for (const w of String(input).toLowerCase().match(/[a-z]{5,}/g) || []) if (ctx.parseColor && ctx.parseColor(w)) protect.add(w);
     for (const clause of splitClauses(normalizeInput(input, protect))) {
@@ -303,6 +322,66 @@
         if (/\b(group|tick|category|categor(y|ies)|names?|genes?|species|strains?|x labels)\b/.test(c)) { style.tick_italic = on; hit = true; say(on ? "Italic group and tick labels" : "Group and tick labels upright"); }
         if (!hit) { style.tick_italic = on; say(on ? "Italic group and tick labels" : "Group and tick labels upright"); }
         continue;
+      }
+
+      // ---- Which columns to analyse (matched against the real column names)
+      const columns = ctx.columns || [];
+      if (columns.length) {
+        let m;
+        const numeric = columns.filter((col) => col.kind !== "text");
+        const nameOf = (f) => f.col.name;
+        if ((m = c.match(/\b(?:quality|filter)(?: column)?\s+(.+?)\s*(?:(at least|>=|≥|above|over|minimum|min|greater than)|(at most|<=|≤|below|under|maximum|max|less than))\s*(-?\d+(?:\.\d+)?)/))) {
+          const f = findColumn(m[1], numeric);
+          if (f && "filter_col" in settings) {
+            settings.filter_col = nameOf(f);
+            if (m[2]) settings.filter_min = m[4]; else settings.filter_max = m[4];
+            say(`Keep rows where ${nameOf(f)} is ${m[2] ? "at least" : "at most"} ${m[4]}`); continue;
+          }
+        }
+        if (/\b(no|remove|turn off|without) (the )?(quality )?filter\b/.test(c) && "filter_col" in settings) { settings.filter_col = ""; say("Quality filter off"); continue; }
+        if ((m = c.match(/\btime column\b(?: is| =|:| to)?\s+(.+)$/)) && "time_col" in settings) {
+          const f = findColumn(m[1], numeric); if (f) { settings.time_col = nameOf(f); say("Time column: " + nameOf(f)); continue; }
+        }
+        if (ctx.analysis === "correlation") {
+          if ((m = c.match(/\b(?:plot\s+)?(.+?)\s+(?:against|vs\.?|versus)\s+(.+)$/))) {
+            const yf = findColumn(m[1], numeric), xf = findColumn(m[2], numeric);
+            if (yf && xf && yf.col !== xf.col) { settings.y_col = nameOf(yf); settings.x_col = nameOf(xf); say(`Y: ${nameOf(yf)} · X: ${nameOf(xf)}`); continue; }
+          }
+          if ((m = c.match(/\b(.+?)\s+on the (x|y)[- ]?axis\b/)) || (m = c.match(/\b(x|y)(?: column)?\s+(?:is|=|:)\s+(.+)$/))) {
+            const axis = /^(x|y)$/.test(m[1]) ? m[1] : m[2], text = /^(x|y)$/.test(m[1]) ? m[2] : m[1];
+            const f = findColumn(text, numeric); if (f) { settings[axis + "_col"] = nameOf(f); say(`${axis.toUpperCase()}: ${nameOf(f)}`); continue; }
+          }
+          if ((m = c.match(/\b(?:colou?r|group|split|separate)(?:ed)? by\s+(.+)$/))) {
+            const f = findColumn(m[1], columns); if (f) { settings.group_col = nameOf(f); say("Colored by " + nameOf(f)); continue; }
+          }
+        }
+        if (ctx.analysis === "compare" && settings.layout === "long" || ctx.analysis === "compare") {
+          if ((m = c.match(/\b(?:group(?:ed)?|split|separate) by\s+(.+)$/))) {
+            const f = findColumn(m[1], columns); if (f) { settings.layout = "long"; settings.group_col = nameOf(f); say("Groups from " + nameOf(f)); continue; }
+          }
+          if ((m = c.match(/\bvalues? (?:in|from)\s+(.+)$/)) || (m = c.match(/\buse (.+?) as (?:the )?values?\b/))) {
+            const f = findColumn(m[1], numeric); if (f) { settings.layout = "long"; settings.value_col = nameOf(f); say("Values from " + nameOf(f)); continue; }
+          }
+          if ((m = c.match(/\b(?:only|just|compare)\s+(.+)$/)) && settings.layout !== "long") {
+            const picked = m[1].split(/\s*(?:,|\band\b|&|\+)\s*/).map((x) => findColumn(x, numeric)).filter(Boolean).map(nameOf);
+            if (picked.length >= 1 && picked.length === new Set(picked).size && picked.length === m[1].split(/\s*(?:,|\band\b|&|\+)\s*/).filter(Boolean).length) {
+              settings.columns = picked; say("Groups: " + picked.join(", ")); continue;
+            }
+          }
+          if (/\b(all|every) (columns|groups)\b/.test(c) && settings.layout !== "long" && /\b(use|show|include|compare)\b/.test(c)) { settings.columns = []; say("Using every numeric column"); continue; }
+        }
+        if (ctx.analysis === "dose" && (m = c.match(/\bconcentrations?(?: column)?\s+(?:is|are|in|from|=|:)\s+(.+)$/))) {
+          const f = findColumn(m[1], numeric); if (f) { settings.x_col = nameOf(f); say("Concentrations from " + nameOf(f)); continue; }
+        }
+        // "use Cyclic Height", "plot heart rate", "analyze glucose"
+        if ((m = c.match(/^\s*(?:use|plot|show|measure|analy[sz]e|switch to|look at|graph|chart|analyse)\s+(?:the\s+)?(.+?)(?:\s+(?:column|measurement|data|values|instead))?\s*$/))) {
+          const f = findColumn(m[1], numeric.filter((col) => col.kind !== "time"));
+          if (f && f.len > 0) {
+            if (ctx.analysis === "timecourse") { settings.value_col = nameOf(f); say("Measurement: " + nameOf(f)); continue; }
+            if (ctx.analysis === "compare" && settings.layout === "long") { settings.value_col = nameOf(f); say("Values from " + nameOf(f)); continue; }
+            if (ctx.analysis === "correlation") { settings.y_col = nameOf(f); say("Y: " + nameOf(f)); continue; }
+          }
+        }
       }
 
       // ---- Analysis settings

@@ -30,7 +30,7 @@ from scipy.optimize import curve_fit  # noqa: E402
 
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
-ENGINE_VERSION = "0.5.1"
+ENGINE_VERSION = "0.6.0"
 
 
 class UserError(Exception):
@@ -141,11 +141,8 @@ def _read_table(text):
             break
     if start is None:
         start = 1 if len(rows) > 1 else 0
-    header_rows = rows[max(0, start - 3):start]
-    names = []
-    for j in range(width):
-        bits = [str(h[j]).strip() for h in header_rows if str(h[j]).strip()]
-        names.append(" ".join(bits) or "Column %d" % (j + 1))
+    header_rows = rows[max(0, start - 4):start]
+    names = _column_names(header_rows, width)
     seen = {}
     for j, n in enumerate(names):
         if n in seen:
@@ -185,6 +182,52 @@ def _read_table(text):
         df = df[keep].reset_index(drop=True)
     info = {"kinds": kinds, "separator": sep_name, "header_rows": len(header_rows), "n_rows": len(df)}
     return df, info
+
+
+_UNIT = re.compile(r"^(\(?[a-zA-Zµμ°%/·^²³0-9.\-]{1,12}\)?)$")
+
+
+def _looks_like_units(row):
+    cells = [str(c).strip() for c in row if str(c).strip()]
+    return bool(cells) and all(_UNIT.match(c) and " " not in c and not c[0].isdigit() for c in cells) \
+        and sum(len(c) for c in cells) / len(cells) <= 6
+
+
+def _column_names(header_rows, width):
+    """Names from up to four header rows, as LabChart, Prism and Excel write them.
+
+    The row nearest the numbers gives the name; a units row (s, V, BPM, mL/min) is added in
+    parentheses; rows above only add their text when it's needed to tell columns apart."""
+    rows = [list(r) + [""] * (width - len(r)) for r in header_rows]
+    units = [""] * width
+    if len(rows) >= 2 and _looks_like_units(rows[-1]):
+        units = [str(c).strip().strip("()") for c in rows[-1]]
+        rows = rows[:-1]
+    names = []
+    for j in range(width):
+        cells = [str(r[j]).strip() for r in rows]
+        names.append(next((c for c in reversed(cells) if c), ""))
+    filled = [n for n in names if n]
+    if len(set(filled)) < len(filled) and len(rows) >= 2:
+        # Some names repeat (e.g. Rep 1 under Group A and Group B): prefix every column with the
+        # nearest row above that tells them apart. Merged cells repeat to the right.
+        for r in reversed(rows[:-1]):
+            row = [str(c).strip() for c in r]
+            carried, last = [], ""
+            for j, c in enumerate(row):
+                last = c or (last if names[j] else "")
+                carried.append(last)
+            if len({carried[j] for j in range(width) if names[j] and carried[j]}) > 1:
+                names = ["%s · %s" % (carried[j], names[j]) if names[j] and carried[j] and carried[j] != names[j] else names[j]
+                         for j in range(width)]
+                break
+    out = []
+    for j in range(width):
+        n = names[j] or ("Column %d" % (j + 1))
+        if units[j] and names[j]:
+            n = "%s (%s)" % (n, units[j])
+        out.append(n)
+    return out
 
 
 def _labels(df, col, info):
@@ -1366,8 +1409,22 @@ def analysis_compare(datasets, S, s):
             or _numeric_cols(df, info)
         if not cols:
             raise UserError("No numeric columns found to compare.")
-        names = _order(cols, S.get("group_order"))
-        values = [pd.to_numeric(df[c], errors="coerce").to_numpy(float) for c in names]
+        heads = [c.split(" · ", 1)[0] if " · " in c else None for c in cols]
+        if S.get("combine_headings", True) and all(heads) and len(set(heads)) < len(heads):
+            # Prism-style grouped table: replicate columns under one heading form one group
+            pooled = {}
+            for c, h in zip(cols, heads):
+                pooled.setdefault(h, []).append(pd.to_numeric(df[c], errors="coerce").to_numpy(float))
+            names = _order(list(pooled), S.get("group_order"))
+            values = [np.concatenate(pooled[g]) for g in names]
+            col_notes.append("Columns under the same heading were combined into one group each (%s)."
+                             % ", ".join("%s: %d columns" % (g, len(pooled[g])) for g in names))
+            if paired:
+                paired = False
+                col_notes.append("Paired testing was turned off because combined columns no longer line up by subject.")
+        else:
+            names = _order(cols, S.get("group_order"))
+            values = [pd.to_numeric(df[c], errors="coerce").to_numpy(float) for c in names]
         ylabel = S.get("y_name") or ""
     if not names:
         raise UserError("No groups found.")
@@ -1418,6 +1475,23 @@ def _parse_clock_value(text, mult):
         raise UserError('Couldn\'t read the time "%s". Use mm:ss (e.g. 10:30) or a number.' % t)
 
 
+_EVENT_WORDS = re.compile(r"inj|dose|drug|stim|event|treat|admin|start|onset|challenge|agonist|infus|bolus|gavage|ip\b|i\.p", re.I)
+
+
+def _event_from_comments(df, info, t):
+    """(time, comment) for the event marked in a text column, if there's a clear one."""
+    for col in [c for c in df.columns if info["kinds"][c] == "text"]:
+        texts = df[col].astype(str).str.strip()
+        marked = [(i, x) for i, x in enumerate(texts) if x and x.lower() != "nan" and i < len(t) and np.isfinite(t[i])]
+        if not marked:
+            continue
+        hits = [m for m in marked if _EVENT_WORDS.search(m[1])]
+        pick = hits[0] if hits else (marked[0] if len(marked) == 1 else None)
+        if pick:
+            return float(t[pick[0]]), pick[1][:40]
+    return None
+
+
 def _parse_ranges(text, mult):
     out = []
     for part in re.split(r"[;,]", str(text or "")):
@@ -1466,6 +1540,7 @@ def analysis_timecourse(datasets, S, s):
     notes = []
 
     per = []
+    detected = {}
     no_base, no_end = [], []
     tcol = vcol = None
     all_cols = [set(read_table(d["text"])[0].columns) for d in sessions]
@@ -1526,8 +1601,15 @@ def analysis_timecourse(datasets, S, s):
             ok &= ~((t >= a) & (t <= b))
         ev = _parse_clock_value(meta.get("event"), mult)
         if ev is None:
-            ev = 0.0
-            notes.append('"%s" has no event time, so time 0 was used.' % name)
+            # LabChart and many recorders mark the injection in a comment column: use that time.
+            found = _event_from_comments(df, info, t)
+            if found:
+                ev, label = found
+                detected[d.get("id") or name] = _fmt_clock(ev)
+                notes.append('"%s": event time %s taken from the comment “%s”.' % (name, _fmt_clock(ev), label))
+            else:
+                ev = 0.0
+                notes.append('"%s" has no event time, so time 0 was used.' % name)
         trel = t[ok] - ev
         vv = v[ok]
         if not len(trel):
@@ -1740,7 +1822,7 @@ def analysis_timecourse(datasets, S, s):
             {"id": "endpoint", "title": "Endpoint", "fig": fig2, "style": s2},
         ],
         "tables": tables, "summary": summary, "notes": notes + res["notes"],
-        "methods": _methods(s_meth, res, extra), "groups": groups,
+        "methods": _methods(s_meth, res, extra), "groups": groups, "events": detected,
     }
 
 
@@ -2017,7 +2099,8 @@ def run(config, datasets):
     return {"figures": figs, "tables": out["tables"], "summary": out["summary"], "notes": notes,
             "methods": out["methods"], "groups": groups,
             "group_styles": [{"name": g["name"], "color": to_hex(g["color"]), "label": g["label"]} for g in gs],
-            "colors": {"bg": to_hex(s["bg"]), "fg": to_hex(s["fg"]), "ax_bg": to_hex(s["ax_bg"])}}
+            "colors": {"bg": to_hex(s["bg"]), "fg": to_hex(s["fg"]), "ax_bg": to_hex(s["ax_bg"])},
+            "events": out.get("events", {})}
 
 
 def export_figure(index, fmt, dpi=300, transparent=False):
