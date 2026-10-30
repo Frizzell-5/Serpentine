@@ -355,3 +355,18 @@ textarea.data-text { font: 12px/1.5 var(--font-data); white-space: pre; overflow
 .welcome p { margin: 0 0 6px; color: var(--muted); }
 .welcome ol { margin: 0 0 6px; padding-left: 20px; display: grid; gap: 3px; font-size: 13.5px; }
 .welcome-text { flex: 1 1 380px; min-width: 0; }
+
+/* v0.7: "Surprise me" quick style */
+.preset-surprise { border-style: dashed; border-color: var(--accent); background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--panel)), var(--panel)); }
+.preset-surprise b { color: var(--accent); }
+
+/* Phones: keep the top bar to two short rows instead of three */
+@media (max-width: 600px) {
+  .topbar { gap: 8px 10px; padding-top: 8px; padding-bottom: 8px; }
+  .topbar-actions { flex-wrap: nowrap; overflow-x: auto; gap: 2px; scrollbar-width: none; }
+  .topbar-actions::-webkit-scrollbar { display: none; }
+  .topbar-actions .btn { flex: none; padding-left: 9px; padding-right: 9px; }
+  .status { margin-right: 2px; padding: 4px 8px; }
+  .status-ready .status-text { display: none; } /* the green dot says it; frees room for Save */
+  .sessions-table td:nth-child(2) input { min-width: 104px; }
+}

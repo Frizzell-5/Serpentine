@@ -21,7 +21,8 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
-from matplotlib import font_manager  # noqa: E402
+from matplotlib import font_manager, patheffects  # noqa: E402
+from matplotlib.patches import FancyBboxPatch  # noqa: E402
 from matplotlib.colors import to_rgba, to_rgb, to_hex  # noqa: E402
 from matplotlib.ticker import FuncFormatter, MultipleLocator, FormatStrFormatter, LogLocator, NullFormatter, MaxNLocator  # noqa: E402
 import scipy  # noqa: E402
@@ -30,7 +31,7 @@ from scipy.optimize import curve_fit  # noqa: E402
 
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
-ENGINE_VERSION = "0.6.0"
+ENGINE_VERSION = "0.7.0"
 
 
 class UserError(Exception):
@@ -363,6 +364,11 @@ PALETTES = {
     "sunset": ["#3D348B", "#F18701", "#7678ED", "#F35B04", "#F7B801", "#9B2226"],
     "earth": ["#5F7161", "#C9A66B", "#8C5E58", "#A3B18A", "#3A5A40", "#DDB892"],
     "neon": ["#00F5D4", "#F15BB5", "#FEE440", "#00BBF9", "#9B5DE5", "#F72585"],
+    "vivid": ["#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F", "#8491B4", "#91D1C2", "#7E6148"],
+    "jewel": ["#1B4965", "#9E2A2B", "#2D6A4F", "#7B2CBF", "#C9A227", "#0F7173"],
+    "retro": ["#E07A5F", "#3D405B", "#81B29A", "#F2CC8F", "#6D597A", "#B56576"],
+    "candy": ["#FF6B9A", "#5CC8FF", "#FFC145", "#8E7DFF", "#3DDC97", "#FF8C61"],
+    "forest": ["#264027", "#6F732F", "#B38A58", "#3B6064", "#55828B", "#87BBA2"],
     "grayscale": ["#1F1F1F", "#8A8A8A", "#C4C4C4", "#525252", "#A8A8A8", "#6E6E6E"],
 }
 QUALITATIVE_CMAPS = {"tab10", "tab20", "tab20b", "tab20c", "Set1", "Set2", "Set3", "Dark2", "Paired",
@@ -403,6 +409,7 @@ LOOK_DEFAULTS = {
     "offset_axes": 0, "trim_axes": False, "tick_dir": "out", "tick_length": 3.5, "minor_ticks": False,
     "cat_ticks": False, "grid": "none", "grid_style": "solid", "grid_alpha": 0.15,
     "legend": "best", "legend_frame": False, "legend_cols": 1,
+    "bar_shape": "square", "shadow": "none", "stripes": False, "value_labels": "none", "box_notch": False, "show_mean": False,
 }
 STYLE_DEFAULTS = dict(LOOK_DEFAULTS, **{
     "custom_colors": "", "groups": {}, "title": "", "xlabel": "", "ylabel": "", "legend_title": "",
@@ -624,7 +631,7 @@ def _point_edge(s, face):
 _LOG_FMT = FuncFormatter(lambda v, _: ("%g" % v) if 1e-4 <= v < 1e6 else ("%.0e" % v))
 
 
-def _limit(get, set_, lo_txt, hi_txt):
+def _limit(get, set_, lo_txt, hi_txt, log=False):
     lo, hi = get()
     try:
         lo = float(lo_txt) if str(lo_txt).strip() != "" else lo
@@ -634,7 +641,7 @@ def _limit(get, set_, lo_txt, hi_txt):
         hi = float(hi_txt) if str(hi_txt).strip() != "" else hi
     except ValueError:
         pass
-    if hi > lo:
+    if hi > lo and not (log and lo <= 0):  # a log axis can't start at 0 or below; leave its automatic limits
         set_(lo, hi)
 
 
@@ -662,11 +669,11 @@ def _finish(ax, s, xlabel="", ylabel="", title="", legend=False, title_pad=None)
             else:
                 axis.set_minor_formatter(NullFormatter())
     if cat != "y":
-        _limit(ax.get_ylim, ax.set_ylim, s["ymin"], s["ymax"])
+        _limit(ax.get_ylim, ax.set_ylim, s["ymin"], s["ymax"], ax.get_yscale() == "log")
     else:
         _limit(ax.get_ylim, lambda lo, hi: None, "", "")
     if cat != "x":
-        _limit(ax.get_xlim, ax.set_xlim, s["xmin"], s["xmax"])
+        _limit(ax.get_xlim, ax.set_xlim, s["xmin"], s["xmax"], ax.get_xscale() == "log")
     for key, axis, numeric in (("ytick_step", ax.yaxis, cat != "y"), ("xtick_step", ax.xaxis, cat != "x")):
         try:
             step = float(s[key])
@@ -737,10 +744,92 @@ def _parse_ref_lines(text):
     return out
 
 
+def _stripes(ax, s, cat):
+    """Zebra bands behind the data: one per group on a category axis, otherwise between value ticks."""
+    xl, yl = ax.get_xlim(), ax.get_ylim()
+    kw = dict(color=to_rgba(s["fg"], 0.05 if s["theme"] != "dark" else 0.07), lw=0, zorder=0)
+    if cat:
+        n = len(ax.get_xticks() if cat == "x" else ax.get_yticks())
+        for k in range(0, n, 2):
+            (ax.axvspan if cat == "x" else ax.axhspan)(k - 0.5, k + 0.5, **kw)
+    else:
+        lo, hi = sorted(yl)
+        tk = [t for t in ax.get_yticks() if lo <= t <= hi]
+        for a, b in zip(tk[0::2], tk[1::2]):
+            ax.axhspan(a, b, **kw)
+    ax.set_xlim(xl)
+    ax.set_ylim(yl)
+
+
+def _round_bars(ax, s):
+    bars = [p for p in ax.patches if getattr(p, "_ll_bar", False)]
+    H = s["orientation"] == "horizontal"
+    if not bars or (ax.get_xscale() if H else ax.get_yscale()) != "linear":
+        return
+    o = ax.transData.transform((0, 0))
+    sx = abs(ax.transData.transform((1, 0))[0] - o[0]) or 1.0
+    sy = abs(ax.transData.transform((0, 1))[1] - o[1]) or 1.0
+    for p in bars:
+        x, y, w, h = p.get_x(), p.get_y(), p.get_width(), p.get_height()
+        if w < 0:
+            x, w = x + w, -w
+        if h < 0:
+            y, h = y + h, -h
+        if w * sx < 1 or h * sy < 1:
+            continue
+        thick = h * sy if H else w * sx
+        r = min(thick * 0.28, w * sx / 2, h * sy / 2)  # corner radius in pixels
+        nb = FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0,rounding_size=%.6g" % float(r / sx), mutation_aspect=sx / sy,
+                            facecolor=p.get_facecolor(), edgecolor=p.get_edgecolor(), linewidth=p.get_linewidth(),
+                            hatch=p.get_hatch(), zorder=p.get_zorder())
+        p.remove()
+        ax.add_patch(nb)
+
+
+def _effects(ax, s):
+    mode = s.get("shadow") or "none"
+    if mode not in ("drop", "glow"):
+        return
+    dark = s["theme"] == "dark"
+    arts = list(ax.lines) + list(ax.patches) + list(ax.collections)
+    for a in arts:
+        try:
+            if a.get_zorder() < 1.5:  # bands, shading and stripes stay flat
+                continue
+            if mode == "drop":
+                if hasattr(a, "get_xydata"):
+                    fx = [patheffects.SimpleLineShadow(offset=(1.2, -1.2), alpha=0.45 if dark else 0.22, shadow_color="black"), patheffects.Normal()]
+                else:
+                    fx = [patheffects.SimplePatchShadow(offset=(1.6, -1.6), alpha=0.5 if dark else 0.2, shadow_rgbFace="black"), patheffects.Normal()]
+            else:
+                if hasattr(a, "get_xydata"):
+                    c, w = a.get_color(), a.get_linewidth()
+                elif hasattr(a, "get_sizes"):  # scatter
+                    fcs = a.get_facecolor()
+                    c, w = (fcs[0] if len(fcs) else s["fg"]), s["marker_size"] * 0.8
+                else:
+                    c, w = a.get_edgecolor(), max(a.get_linewidth(), s["line_width"])
+                    if hasattr(c, "ndim") and getattr(c, "ndim", 1) > 1:
+                        c = c[0] if len(c) else s["fg"]
+                if to_rgba(c)[3] * (a.get_alpha() if a.get_alpha() is not None else 1) < 0.5:
+                    continue  # faint session traces would turn into fog
+                c = to_rgb(c)
+                fx = [patheffects.Stroke(linewidth=w * 5, foreground=c, alpha=0.07),
+                      patheffects.Stroke(linewidth=w * 2.6, foreground=c, alpha=0.18), patheffects.Normal()]
+            a.set_path_effects(fx)
+        except Exception:
+            continue
+
+
 def _polish(fig, s, notes):
     """Final pass on every axes: axis lines, offsets, trimming, reference lines, panel letter."""
     for i, ax in enumerate(fig.axes):
         cat = getattr(ax, "_ll_cat", None)
+        if s.get("stripes"):
+            _stripes(ax, s, cat)
+        if s.get("bar_shape") == "rounded":
+            _round_bars(ax, s)
+        _effects(ax, s)
         try:
             for axis, val, label in _parse_ref_lines(s["ref_lines"]):
                 kw = dict(color=to_rgba(s["fg"], 0.55), lw=max(0.6, s["line_width"] * 0.6), ls=(0, (4, 3)), zorder=1)
@@ -913,14 +1002,13 @@ def plot_groups(ax, names, values, s, paired_matrix=None):
         top = [m + e, float(fin.max())]
         if kind == "bar":
             kw = dict(color=face(g), edgecolor=col, linewidth=ew, hatch=g["hatch"], zorder=2)
-            if H:
-                ax.barh(c, m, height=bw, **kw)
-            else:
-                ax.bar(c, m, width=bw, **kw)
+            bars = ax.barh(c, m, height=bw, **kw) if H else ax.bar(c, m, width=bw, **kw)
+            for b in bars:
+                b._ll_bar = True  # rounded later, once the axis limits are final
             errbar(c, m, e, summary_color(g))
         elif kind == "box":
             bp = ax.boxplot([fin], positions=[c], widths=bw * 0.8, patch_artist=True, vert=not H,
-                            showfliers=not show_pts, zorder=2)
+                            showfliers=not show_pts, notch=bool(s.get("box_notch")) and len(fin) > 2, zorder=2)
             for b in bp["boxes"]:
                 b.set(facecolor=face(g), edgecolor=col, linewidth=ew, hatch=g["hatch"])
             for part in ("whiskers", "caps"):
@@ -981,7 +1069,31 @@ def plot_groups(ax, names, values, s, paired_matrix=None):
         elif kind == "beeswarm":
             med = float(np.median(fin))
             ax.plot(*XY([c - half, c + half], [med, med]), color=fg, linewidth=lw * 1.4, zorder=6)
+        if s.get("show_mean") and kind in ("box", "violin", "boxviolin", "raincloud", "beeswarm", "strip"):
+            ax.scatter(*XY([c + (0.07 if kind == "raincloud" else 0)], [m]), s=(ms * 1.25) ** 2, marker="D",
+                       color=bg, edgecolor=fg, linewidth=max(0.6, lw * 0.6), zorder=7)
         tops.append(max(top))
+
+    labels_kind = s.get("value_labels") or "none"
+    if labels_kind in ("mean", "median", "n"):
+        try:
+            dec = int(float(s["y_decimals"]))
+        except (TypeError, ValueError):
+            dec = None
+        for i, v in enumerate(vals):
+            fin = v[np.isfinite(v)]
+            if not len(fin):
+                continue
+            if labels_kind == "n":
+                text = "n = %d" % len(fin)
+            else:
+                val = float(np.mean(fin) if labels_kind == "mean" else np.median(fin))
+                text = ("%%.%df" % dec) % val if dec is not None and 0 <= dec <= 8 else "%.3g" % val
+            off = (s["font_size"] * 0.35, 0) if H else (0, s["font_size"] * 0.35)
+            ax.annotate(text, xy=XY(cats[i], tops[i]), xytext=off, textcoords="offset points",
+                        ha="left" if H else "center", va="center" if H else "bottom",
+                        fontsize=s["tick_size"] * 0.95, color=s["fg"], zorder=7, annotation_clip=False)
+            tops[i] += span * (0.09 if not H else 0.14) * s["tick_size"] / 10  # keep brackets clear of the label
 
     if paired_matrix is not None and n > 1:
         line_c = to_rgba(fg, 0.28)
@@ -2039,11 +2151,230 @@ def analysis_dose(datasets, S, s):
             "groups": [c[0] for c in curves]}
 
 
+# ----------------------------------------------------------------------------
+# Survival (Kaplan-Meier)
+# ----------------------------------------------------------------------------
+
+_EVENT_YES = {"1", "yes", "y", "true", "dead", "died", "death", "event", "deceased", "failed", "failure", "relapse", "relapsed"}
+
+
+def _event_flags(df, col, info):
+    if info["kinds"].get(col) == "number":
+        return (pd.to_numeric(df[col], errors="coerce").fillna(0).to_numpy(float) > 0).astype(float)
+    return df[col].astype(str).str.strip().str.lower().isin(_EVENT_YES).to_numpy(float)
+
+
+def _km(t, e):
+    """Kaplan-Meier estimate. Returns step times, survival, 95% CI (log-log) and censored points."""
+    order = np.argsort(t, kind="stable")
+    t, e = t[order], e[order]
+    times, surv, lo, hi = [0.0], [1.0], [1.0], [1.0]
+    s_val, gw, n = 1.0, 0.0, len(t)
+    at_risk = [(0.0, n)]
+    for u in np.unique(t):
+        here = t == u
+        d = float(e[here].sum())
+        if d > 0 and n > 0:
+            s_val *= 1 - d / n
+            if n > d:
+                gw += d / (n * (n - d))
+            if 0 < s_val < 1:
+                se = math.sqrt(gw) / abs(math.log(s_val))
+                a, b = s_val ** math.exp(1.96 * se), s_val ** math.exp(-1.96 * se)
+            else:
+                a = b = s_val
+            times.append(float(u))
+            surv.append(s_val)
+            lo.append(a)
+            hi.append(b)
+        n -= int(here.sum())
+    cens = [(float(u), _km_at(times, surv, u)) for u in t[e == 0]]
+    return np.array(times), np.array(surv), np.array(lo), np.array(hi), cens
+
+
+def _km_at(times, surv, x):
+    i = np.searchsorted(times, x, side="right") - 1
+    return float(surv[max(i, 0)])
+
+
+def _km_median(times, curve):
+    below = np.nonzero(np.asarray(curve) <= 0.5)[0]
+    return float(times[below[0]]) if len(below) else None
+
+
+def _logrank(groups_t, groups_e):
+    """k-group log-rank test. Returns chi2, df, p, observed and expected events, and the variance matrix."""
+    k = len(groups_t)
+    all_t = np.concatenate(groups_t)
+    all_e = np.concatenate(groups_e)
+    O, E = np.zeros(k), np.zeros(k)
+    V = np.zeros((k, k))
+    for u in np.unique(all_t[all_e > 0]):
+        n = np.array([(gt >= u).sum() for gt in groups_t], float)
+        d = np.array([((gt == u) & (ge > 0)).sum() for gt, ge in zip(groups_t, groups_e)], float)
+        N, D = n.sum(), d.sum()
+        if N < 1:
+            continue
+        O += d
+        E += D * n / N
+        if N > 1:
+            f = D * (N - D) / (N - 1)
+            V += f * (np.diag(n / N) - np.outer(n, n) / N ** 2)
+    diff = (O - E)[:-1]
+    sub = V[:-1, :-1]
+    try:
+        chi2 = float(diff @ np.linalg.pinv(sub) @ diff)
+    except np.linalg.LinAlgError:
+        chi2 = float("nan")
+    p = float(stats.chi2.sf(chi2, k - 1)) if np.isfinite(chi2) else None
+    return chi2, k - 1, p, O, E, V
+
+
+def analysis_survival(datasets, S, s):
+    d = _pick_dataset(datasets, S.get("dataset"))
+    df, info = read_table(d["text"])
+    num = _numeric_cols(df, info)
+    col_notes, notes = [], []
+    tcol = _choose(S, "time_col", df, num[0] if num else None, col_notes, "time")
+    if not tcol:
+        raise UserError("Survival needs a numeric column with the time of death or last follow-up.")
+    _need_col(df, tcol, "time")
+    auto_e = next((c for c in df.columns if c != tcol and re.search(r"event|status|dead|died|death|censor|outcome", c, re.I)), "")
+    # "" means pick automatically, NONE means the user chose not to use that column
+    NONE = "__none__"
+    ecol = "" if S.get("event_col") == NONE else _choose(S, "event_col", df, auto_e, col_notes, "event") or ""
+    auto_g = next((c for c in df.columns if c not in (tcol, ecol) and info["kinds"][c] == "text"), "")
+    gcol = "" if S.get("group_col") == NONE else _choose(S, "group_col", df, auto_g, col_notes, "group") or ""
+    if ecol == tcol or gcol == tcol:
+        raise UserError("Pick different columns for time, event and group.")
+    t_all = pd.to_numeric(df[tcol], errors="coerce").to_numpy(float)
+    if ecol:
+        e_all = _event_flags(df, ecol, info)
+    else:
+        e_all = np.ones(len(df))
+        notes.append("No event column was chosen, so every subject is counted as an event (no censoring). "
+                     "Choose one in Settings if some subjects were still alive or lost to follow-up.")
+    if gcol:
+        labels = _labels(df, gcol, info)
+        groups = _order([g for g in dict.fromkeys(labels) if g and g.lower() != "nan"], S.get("group_order"))
+    else:
+        labels = pd.Series(["All"] * len(df))
+        groups = ["All"]
+    if (t_all[np.isfinite(t_all)] < 0).any():
+        raise UserError("Survival times can't be negative.")
+    pct = S.get("y_scale", "pct") == "pct"
+    k = 100.0 if pct else 1.0
+    unit = (S.get("time_unit") or "").strip()
+    G = _gstyles(s, groups)
+    fig, ax = _new_fig(s)
+    lw, ms = s["line_width"], s["marker_size"]
+    rows, med_rows, risk_rows, used_t, used_e = [], [], [], [], []
+    ticks_risk = []
+    with plt.rc_context(_rc(s)):
+        for g in G:
+            sel = (labels == g["name"]).to_numpy()
+            t, e = t_all[sel], e_all[sel]
+            ok = np.isfinite(t)
+            t, e = t[ok], e[ok]
+            if not len(t):
+                notes.append("%s has no usable times." % g["label"])
+                continue
+            used_t.append(t)
+            used_e.append(e)
+            times, surv, lo, hi, cens = _km(t, e)
+            end = float(t.max())
+            xs, ys = np.append(times, end), np.append(surv, surv[-1])
+            c = g["color"]
+            ax.step(xs, ys * k, where="post", color=c, lw=lw * 1.2, ls=g["ls"], label=g["label"] if len(groups) > 1 else None, zorder=3)
+            if S.get("show_ci", True):
+                ax.fill_between(xs, np.append(lo, lo[-1]) * k, np.append(hi, hi[-1]) * k, step="post",
+                                color=to_rgba(c, s["band_alpha"] * 0.85), lw=0, zorder=1)
+            if S.get("show_censors", True) and cens:
+                ax.scatter([x for x, _ in cens], [y * k for _, y in cens], marker="|", s=(ms * 1.6) ** 2,
+                           color=c, linewidths=max(0.8, lw * 0.8), zorder=4)
+            med = _km_median(times, surv)
+            med_lo, med_hi = _km_median(times, lo), _km_median(times, hi)
+            if med is not None and S.get("show_median", False):
+                ax.plot([0, med, med], [50 * k / 100, 50 * k / 100, 0], color=to_rgba(c, 0.7),
+                        lw=max(0.6, lw * 0.6), ls=(0, (3, 2)), zorder=2)
+            fmt_t = lambda v: "not reached" if v is None else _fmt(v)
+            med_rows.append([g["label"], len(t), int(e.sum()), int(len(t) - e.sum()), fmt_t(med),
+                             "%s to %s" % (fmt_t(med_lo), fmt_t(med_hi))])
+            rows.extend([g["label"], _fmt(x), _r(y * k, 4), _r(a * k, 4), _r(b * k, 4)]
+                        for x, y, a, b in zip(times, surv, lo, hi))
+            ticks_risk.append((g, t))
+        if not used_t:
+            raise UserError("No survival times found in the %s column." % tcol)
+        ax.set_xlim(left=0)
+        ax.set_ylim(0, 105 if pct else 1.05)
+        xlabel = "Time" + (" (%s)" % unit if unit else "")
+        _finish(ax, s, xlabel=xlabel, ylabel="Percent survival" if pct else "Probability of survival",
+                legend=len(groups) > 1)
+        if S.get("at_risk", False):
+            xt = [x for x in ax.get_xticks() if ax.get_xlim()[0] - 1e-9 <= x <= ax.get_xlim()[1] + 1e-9]
+            fs = s["tick_size"] * 0.95
+            base = s["label_size"] * 1.6 + s["tick_size"] * 1.4 + s["tick_length"] + s["offset_axes"] + 8
+            ax.annotate("Number at risk", xy=(0, 0), xycoords="axes fraction", xytext=(0, -base),
+                        textcoords="offset points", ha="left", va="top", fontsize=fs, fontweight="bold")
+            for r_i, (g, t) in enumerate(ticks_risk):
+                y_off = -base - fs * 1.45 * (r_i + 1)
+                ax.annotate(g["label"], xy=(0, 0), xycoords="axes fraction", xytext=(-8, y_off),
+                            textcoords="offset points", ha="right", va="top", fontsize=fs, color=g["color"])
+                counts = []
+                for x in xt:
+                    n_r = int((t >= x).sum())
+                    counts.append(n_r)
+                    ax.annotate(str(n_r), xy=(x, 0), xycoords=("data", "axes fraction"), xytext=(0, y_off),
+                                textcoords="offset points", ha="center", va="top", fontsize=fs)
+                risk_rows.append([g["label"]] + counts)
+            risk_cols = ["Group"] + [_fmt(x) for x in xt]
+    summary, tables = [], []
+    stat_rows = []
+    if len(used_t) > 1:
+        chi2, df_, p, O, E, V = _logrank(used_t, used_e)
+        if p is not None:
+            summary.append({"label": "Log-rank (Mantel-Cox) test", "value": "chi2(%d) = %.2f, %s" % (df_, chi2, fmt_p(p)), "p": _r(p)})
+            stat_rows.append(["Log-rank (Mantel-Cox)", "%.3f" % chi2, df_, _r(p), stars(p)])
+        names_used = [r[0] for r in med_rows]
+        if len(used_t) == 2 and V[0, 0] > 0:
+            log_hr = (O[0] - E[0]) / V[0, 0]
+            se = 1 / math.sqrt(V[0, 0])
+            hr = math.exp(log_hr)
+            summary.append({"label": "Hazard ratio (%s vs %s)" % (names_used[0], names_used[1]),
+                            "value": "%.2f (95%% CI %.2f to %.2f)" % (hr, math.exp(log_hr - 1.96 * se), math.exp(log_hr + 1.96 * se))})
+        if len(used_t) > 2:
+            pairs = []
+            for i in range(len(used_t)):
+                for j in range(i + 1, len(used_t)):
+                    pij = _logrank([used_t[i], used_t[j]], [used_e[i], used_e[j]])[2]
+                    pairs.append((i, j, 1.0 if pij is None else pij))
+            adj = _holm([p for _, _, p in pairs])
+            tables.append({"title": "Pairwise log-rank tests (Holm-adjusted)", "columns": ["Comparison", "Adjusted p", "Summary"],
+                           "rows": [["%s vs %s" % (names_used[i], names_used[j]), _r(a), stars(a)] for (i, j, _), a in zip(pairs, adj)]})
+    tables.insert(0, {"title": "Median survival", "columns": ["Group", "n", "Events", "Censored", "Median", "95% CI"], "rows": med_rows})
+    if stat_rows:
+        tables.insert(1, {"title": "Curve comparison", "columns": ["Test", "Chi-square", "df", "p", "Summary"], "rows": stat_rows})
+    if risk_rows:
+        tables.append({"title": "Number at risk", "columns": risk_cols, "rows": risk_rows})
+    tables.append({"title": "Survival curve", "columns": ["Group", "Time", "Survival", "Lower 95%", "Upper 95%"], "rows": rows})
+    for r in med_rows:
+        summary.append({"label": "Median survival (%s)" % r[0] if len(med_rows) > 1 else "Median survival",
+                        "value": r[4] + (" %s" % unit if unit and r[4] != "not reached" else "")})
+    meth = ("Survival was estimated with the Kaplan-Meier method%s%s. %s"
+            % (" (shaded bands: 95% confidence intervals, log-log transformation)" if S.get("show_ci", True) else "",
+               "; curves were compared with the log-rank (Mantel-Cox) test%s, and P < 0.05 was considered statistically significant"
+               % (" with Holm-adjusted pairwise comparisons" if len(used_t) > 2 else "") if len(used_t) > 1 else "",
+               _software_line()))
+    return {"figures": [{"id": "survival", "title": "Survival", "fig": fig, "style": s}],
+            "tables": tables, "summary": summary, "notes": col_notes + notes, "methods": meth, "groups": groups}
+
+
 ANALYSES = {
     "compare": analysis_compare,
     "timecourse": analysis_timecourse,
     "correlation": analysis_correlation,
     "dose": analysis_dose,
+    "survival": analysis_survival,
 }
 
 # ----------------------------------------------------------------------------
@@ -2207,6 +2538,20 @@ def example(kind):
         return {"datasets": [{"name": "Kinase inhibition", "meta": {},
                               "text": _tsv(["Concentration", "Compound A", "Compound B", "Compound C"], rows)}],
                 "settings": {"x_col": "Concentration", "mode": "curves", "x_unit": "nM", "show_ec50": True}}
+    if kind == "survival":
+        # Lifespan of flies on three diets; a few escape or are lost before dying (censored)
+        rows = []
+        for diet, scale, shape in (("Standard diet", 52.0, 4.0), ("Restricted diet", 64.0, 4.5), ("High-sugar diet", 41.0, 3.2)):
+            for _ in range(30):
+                day = scale * (-math.log(1 - rng.random())) ** (1 / shape)
+                lost = rng.random() < 0.12
+                if lost:
+                    day *= rng.uniform(0.3, 0.9)
+                rows.append([diet, "%d" % max(1, round(day)), 0 if lost else 1])
+        return {"datasets": [{"name": "Fly lifespan", "meta": {},
+                              "text": _tsv(["Diet", "Days", "Died"], rows)}],
+                "settings": {"time_col": "Days", "event_col": "Died", "group_col": "Diet", "time_unit": "days",
+                             "show_ci": True, "show_censors": True, "y_scale": "pct"}}
     raise UserError("No example for %s" % kind)
 
 

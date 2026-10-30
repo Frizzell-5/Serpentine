@@ -247,7 +247,7 @@ footer .sp { margin-left: auto; }
   <!-- Hero -->
   <section class="hero">
     <div class="wrap">
-      <div class="eyebrow rise"><span>v0.6</span><i></i><span>Free</span><i></i><span>Runs in your browser</span></div>
+      <div class="eyebrow rise"><span>v0.7</span><i></i><span>Free</span><i></i><span>Runs in your browser</span></div>
       <h1 class="rise d1">Raw lab data in. <em>Publication figures</em> out.</h1>
       <p class="lede rise d2">Serpentine runs the statistics and draws the figures for you, using the same Python tools behind countless published studies. You choose everything from plain menus and never write a line of code. Your data stays on your computer.</p>
       <div class="cta rise d3">
@@ -283,7 +283,7 @@ footer .sp { margin-left: auto; }
         <p>The figure redraws every time you change a setting, so you can see what each choice does.</p>
       </div>
       <ol class="steps">
-        <li><span class="n">01</span><h3>Pick an analysis</h3><p>Compare groups, follow a recording over time, test a correlation or fit a dose-response curve.</p></li>
+        <li><span class="n">01</span><h3>Pick an analysis</h3><p>Compare groups, follow a recording over time, test a correlation, fit a dose-response curve or draw survival curves.</p></li>
         <li><span class="n">02</span><h3>Add your data</h3><p>Paste straight from Excel, Prism or a LabChart Data Pad, or drop in CSV and Excel files.</p></li>
         <li><span class="n">03</span><h3>Set the analysis</h3><p>Baselines, exclusions, normalization, tests and comparisons, each one a plain setting.</p></li>
         <li><span class="n">04</span><h3>Style and export</h3><p>Choose a look, fine-tune colors and labels, then export figures, tables and methods text.</p></li>
@@ -331,6 +331,13 @@ footer .sp { margin-left: auto; }
           <div class="tags"><span>Pearson</span><span>Spearman</span><span>linear fit</span><span>by group</span></div>
           <figcaption><span class="figlabel">Fig. 5 |</span> Body weight against fasting glucose by genotype.</figcaption>
         </figure>
+        <figure class="card">
+          <div class="imgs"><img src="docs/img/g-survival.png" alt="Kaplan-Meier survival curves for flies on three diets with confidence bands, censor ticks and a number-at-risk table."></div>
+          <h3>Survival curve</h3>
+          <p>Kaplan-Meier curves for time to death, relapse or any event, with censored subjects marked. Reports median survival with 95% confidence intervals, the log-rank test, pairwise comparisons for three or more groups and the hazard ratio for two.</p>
+          <div class="tags"><span>Kaplan-Meier</span><span>log-rank</span><span>hazard ratio</span><span>median survival</span><span>number at risk</span></div>
+          <figcaption><span class="figlabel">Fig. 6 |</span> Lifespan of flies on three diets, log-rank test.</figcaption>
+        </figure>
       </div>
     </div>
   </section>
@@ -340,7 +347,7 @@ footer .sp { margin-left: auto; }
     <div class="wrap">
       <div class="section-head">
         <span class="kicker">Figures</span>
-        <h2>Same data. Nine completely different figures.</h2>
+        <h2>Same data. Twelve completely different figures.</h2>
         <p>Python gives you full control over a figure, and so does Serpentine, without the code. Every one of these was made from the same experiment by changing settings in the Style step: plot type, direction, fonts, colors, fills and patterns, markers, axis lines, ticks, gridlines, reference lines and more.</p>
       </div>
       <div class="looks">
@@ -353,12 +360,15 @@ footer .sp { margin-left: auto; }
         <figure class="look"><img src="docs/img/s-sketch.png" alt="Lollipop chart in Comic Neue with star, square and diamond markers."><figcaption><b>Sketch</b><span>lollipop · custom markers</span></figcaption></figure>
         <figure class="look"><img src="docs/img/s-horizontal.png" alt="Horizontal beeswarm plot in viridis colors with exact p-values."><figcaption><b>Horizontal</b><span>beeswarm · viridis · exact p</span></figcaption></figure>
         <figure class="look"><img src="docs/img/s-solid.png" alt="Solid bars from the magma colormap with one-sided SD bars, a renamed group, a reference line and a panel letter."><figcaption><b>Custom</b><span>magma · reference line · panel B</span></figcaption></figure>
+        <figure class="look"><img src="docs/img/s-pop.png" alt="Rounded solid bars in candy colors with drop shadows and the mean printed above each bar."><figcaption><b>Pop</b><span>rounded bars · shadows · values</span></figcaption></figure>
+        <figure class="look"><img src="docs/img/s-blueprint.png" alt="Notched box plots with mean diamonds, drawn in pale lines on a navy background with dashed gridlines."><figcaption><b>Blueprint</b><span>notched box · mean marks</span></figcaption></figure>
+        <figure class="look"><img src="docs/img/s-retro.png" alt="Horizontal lollipop chart in warm colors on cream paper with striped background bands and a serif font."><figcaption><b>Retro</b><span>lollipop · stripes · cream</span></figcaption></figure>
       </div>
-      <figcaption style="margin-top:18px"><span class="figlabel">Fig. 6 |</span> One dataset, nine looks. Save any look as your own style, or share a style file so a whole lab uses the same house style. Export as PNG or TIFF up to 1200&nbsp;dpi, SVG with editable text, PDF, EPS or JPG, or copy straight into slides.</figcaption>
+      <figcaption style="margin-top:18px"><span class="figlabel">Fig. 7 |</span> One dataset, twelve looks. Not sure where to start? <b>Surprise me</b> deals out a new random look each time you press it. Save any look as your own style, or share a style file so a whole lab uses the same house style. Export as PNG or TIFF up to 1200&nbsp;dpi, SVG with editable text, PDF, EPS or JPG, or copy straight into slides.</figcaption>
 
       <div class="freedom">
         <div><h3>Every group, your way</h3><p>Rename groups and give each its own color, marker, fill pattern and line style.</p></div>
-        <div><h3>Any color scheme</h3><p>Ten curated palettes, colorblind-safe options, every matplotlib colormap, or your own hex codes and backgrounds.</p></div>
+        <div><h3>Any color scheme</h3><p>Fifteen curated palettes, colorblind-safe options, every matplotlib colormap, or your own hex codes and backgrounds.</p></div>
         <div><h3>Real typefaces</h3><p>Built-in sans, serif and mono, plus nine web fonts that come through exactly in PNG and PDF exports.</p></div>
         <div><h3>Axes and annotations</h3><p>Choose which axis lines to draw, offset and trim them, set ticks, log scales and limits, and add reference lines, panel letters and exact p-values.</p></div>
         <div><h3>Just say it</h3><p>Type “remove gridlines and make Water navy” and the figure changes. Plain-English commands cover colors, labels, axes, plot types, sizes and more.</p></div>
@@ -476,6 +486,7 @@ footer .sp { margin-left: auto; }
                 <tr><td>How did a signal change after an event?</td><td>Time course around an event. Breathing, heart rate, blood pressure, temperature, activity or any recording with a time column.</td></tr>
                 <tr><td>Does one measure track another?</td><td>Correlation &amp; regression.</td></tr>
                 <tr><td>How potent is this compound?</td><td>Dose-response curve.</td></tr>
+                <tr><td>How long until death, relapse or another event?</td><td>Survival curve. One row per subject with its time, whether the event happened (1) or it was censored (0), and its group.</td></tr>
               </tbody>
             </table></div>
           </article>
@@ -541,9 +552,10 @@ M2      KO         29.4
 
           <article id="g-style">
             <h3>Styling figures</h3>
-            <p>The Style step has everything you would otherwise do in matplotlib, in collapsible sections. Start with a <strong>quick style</strong> (Clean, Journal, Classic, Minimal, Editorial, Boxed, Typewriter, Soft, Poster, Slides, Neon or Sketch), then change anything:</p>
+            <p>The Style step has everything you would otherwise do in matplotlib, in collapsible sections. Start with a <strong>quick style</strong> (Clean, Journal, Classic, Minimal, Editorial, Boxed, Typewriter, Soft, Poster, Slides, Neon, Sketch, Pop, Blueprint, Zebra or Retro), or press <strong>Surprise me</strong> for a random look, then change anything:</p>
             <ul>
-              <li><strong>Plot type:</strong> bar, scatter dot, mean ± error, box, violin, box + violin, raincloud, beeswarm, strip or lollipop, vertical or horizontal, with adjustable widths, point spread, fill and outline.</li>
+              <li><strong>Plot type:</strong> bar, scatter dot, mean ± error, box, violin, box + violin, raincloud, beeswarm, strip or lollipop, vertical or horizontal, with adjustable widths, point spread, fill and outline, rounded bar corners, notched boxes, a mean marker and numbers (mean, median or n) above each group.</li>
+              <li><strong>Effects:</strong> flat, drop shadows or a glow, and an optional striped background.</li>
               <li><strong>Groups:</strong> rename any group and give it its own color, marker, hatch pattern and line style.</li>
               <li><strong>Colors:</strong> palettes, any matplotlib colormap (reversible), your own hex codes, and separate figure, plot-area and text colors.</li>
               <li><strong>Points, lines and error bars:</strong> marker shape, size, opacity and outline; line and axis widths; SEM, SD or 95% CI, two-sided or outward, with any cap width.</li>
@@ -625,7 +637,7 @@ M2      KO         29.4
 
 <footer>
   <div class="wrap">
-    <span><b style="color:var(--ink)">Serpentine</b> v0.6 · Made by Shadan Alrawi</span>
+    <span><b style="color:var(--ink)">Serpentine</b> v0.7 · Made by Shadan Alrawi</span>
     <a href="https://github.com/Frizzell-5/Serpentine">GitHub</a>
     <a href="https://github.com/Frizzell-5/Serpentine/issues">Report an issue</a>
     <span class="sp">Built on Pyodide, NumPy, SciPy, pandas and matplotlib.</span>

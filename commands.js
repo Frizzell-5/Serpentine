@@ -7,7 +7,7 @@
     marker_size: 5, line_width: 1.5, font_size: 10, point_alpha: 0.85, bar_width: 0.62, jitter: 0.12,
     width: 4, height: 3.4, grid_alpha: 0.15, tick_length: 3.5, fill_alpha: 0.25,
   };
-  const PRESETS = ["clean", "journal", "classic", "minimal", "editorial", "boxed", "typewriter", "soft", "poster", "slides", "neon", "sketch"];
+  const PRESETS = ["clean", "journal", "classic", "minimal", "editorial", "boxed", "typewriter", "soft", "poster", "slides", "neon", "sketch", "pop", "blueprint", "zebra", "retro"];
   const PALETTES = [
     [/\bokabe|\bcolou?r[- ]?blind/, "okabe", "Okabe-Ito colorblind-safe palette", false],
     [/\btol\b/, "tol", "Tol bright palette", false],
@@ -18,6 +18,11 @@
     [/\bsunset\b/, "sunset", "Sunset palette", true],
     [/\bearth(y| tones?)?\b/, "earth", "Earth palette", true],
     [/\bneon\b/, "neon", "Neon palette", true],
+    [/\bvivid\b/, "vivid", "Vivid palette", true],
+    [/\bjewel( tones?)?s?\b/, "jewel", "Jewel palette", false],
+    [/\bretro\b/, "retro", "Retro palette", true],
+    [/\bcandy\b/, "candy", "Candy palette", false],
+    [/\bforest\b/, "forest", "Forest palette", true],
     [/\bdefault colou?rs\b|\bserpentine colou?rs\b|\boriginal colou?rs\b/, "serpentine", "Serpentine palette", false],
   ];
   const AMBIGUOUS_CMAPS = new Set(["blues", "greens", "reds", "purples", "oranges", "greys", "hot", "cool", "spring", "summer", "autumn", "winter", "ocean", "copper", "bone", "rainbow", "terrain", "hsv", "pink"]);
@@ -87,13 +92,14 @@
     "rotate", "minor", "ticks", "inside", "outside", "logarithmic", "reference", "decimal", "decimals", "export", "download", "rename",
     "reverse", "order", "spearman", "pearson", "nonparametric", "parametric", "paired", "unpaired", "percent", "normalize", "professional",
     "presentation", "everything", "readable", "landscape", "portrait", "orientation", "sideways", "solid", "hollow", "striped", "hatched",
-    "dashed", "dotted", "frame", "spines", "floating", "offset", "journal", "poster", "slides", "minimal", "editorial", "font", "serif"];
+    "dashed", "dotted", "frame", "spines", "floating", "offset", "journal", "poster", "slides", "minimal", "editorial", "font", "serif",
+    "rounded", "shadow", "shadows", "stripes", "notched", "surprise", "survival", "censored", "proportion"];
   // Ordinary words that sit one letter away from a keyword and must never be "corrected".
   const KEEP = new Set(("start starts started first every white black green brown these there their three seven eight after under above below " +
     "about other would could should along again inner outer right lower upper large small short taller wider place space steps scale range " +
     "model mouse notes value values group groups names units shape sizes style theme thick thing curve curves table cells ratio doses plots " +
     "chart graph image while label later legends error point pointy lines limit limits fills filled solids dots minus plus shade shades " +
-    "frames order orders panel panels title titles serif sense spine stare starry stack total trace traces width height times color front older sides slide fronts posts tones fonts boxes bolder").split(" "));
+    "frames order orders panel panels title titles serif sense spine stare starry stack total trace traces width height times color front older sides slide fronts posts tones fonts boxes bolder square corner corners round").split(" "));
   function editDistance(a, b) {
     if (Math.abs(a.length - b.length) > 2) return 3;
     const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
@@ -267,6 +273,27 @@
       if (/\b(reset|clear)\b.*\b(style|styling|look|everything|all|figure|formatting)\b|\bstart over\b|\bdefault (style|look)\b/.test(c)) { ctx.resetStyle && ctx.resetStyle(); say("Styling reset to defaults"); continue; }
 
       if (/^\s*(redo|redo that|do (that|it) again)\s*$/.test(c)) { ctx.redo && ctx.redo(); say("Redid the change"); continue; }
+      if (/\bsurprise me\b|\brandomi[sz]e\b|\brandom (look|style|colou?rs and fonts)\b|\bshuffle\b.*\b(look|style)\b|\bsomething (different|new)\b|\bmix it up\b|\bsurprise\b/.test(c)) {
+        if (ctx.surprise) { ctx.surprise(); say("A random new look (say it again for another)"); continue; }
+      }
+
+      // ---- Effects and finishing touches
+      if (groupPlot && /\bround(ed)?\b.*\b(corners?|bars?|edges?)\b|\bpill[- ]?(shaped)?\b/.test(c)) { style.bar_shape = neg ? "square" : "rounded"; say(neg ? "Square bar corners" : "Rounded bar corners"); }
+      else if (groupPlot && /\b(square|sharp)\b.*\b(corners?|bars?|edges?)\b/.test(c) && !/\bmarkers?|points?|dots\b/.test(c)) { style.bar_shape = "square"; say("Square bar corners"); }
+      if (/\bshadows?\b|\bdepth\b|\b3d\b/.test(c)) { const off = NEG.test(c.replace(/\bdrop[- ]?shadows?\b/g, "shadows")); style.shadow = off ? "none" : "drop"; say(off ? "No shadows" : "Drop shadows"); }
+      else if (/\bglow(ing|y|s)?\b/.test(c)) { style.shadow = neg ? "none" : "glow"; say(neg ? "Glow off" : "Glow on"); }
+      else if (/\bflat\b|\bno effects\b/.test(c) && !/\bcaps?\b/.test(c)) { style.shadow = "none"; say("Flat, no effects"); }
+      if (/\bzebra\b|\b(striped|stripy|banded) (background|plot area|look)\b|\balternating (bands|stripes|shading|rows|background)\b|\bbackground (stripes|bands)\b|\bstripes? (in|on|behind)\b/.test(c)) { style.stripes = !neg; say(neg ? "Background stripes off" : "Striped background"); }
+      if (groupPlot) {
+        let m;
+        if ((m = c.match(/\b(means?|medians?|averages?|values?|numbers?|n|sample sizes?)\b.*\b(above|on top( of)?|over|on)\b.*\b(bars?|groups?|boxes|each|columns?)\b/)) || /\b(label|number) the (bars|groups|boxes|columns)\b|\bvalue labels\b|\bdata labels\b/.test(c)) {
+          const which = /\bmedians?\b/.test(c) ? "median" : /\b(n|sample sizes?|counts?)\b/.test(c) && !/\bmeans?\b/.test(c) ? "n" : "mean";
+          style.value_labels = neg ? "none" : which; say(neg ? "Value labels off" : { mean: "Means printed above each group", median: "Medians printed above each group", n: "n printed above each group" }[which]);
+        }
+        if (/\bnotch(ed|es)?\b/.test(c)) { style.box_notch = !neg; if (!neg) style.plot_kind = "box"; say(neg ? "Notches off" : "Notched box plot"); }
+        if (/\bmark (the )?means?\b|\bmeans? (diamonds?|markers?|symbols?|points?)\b|\bdiamonds? (for|at) the means?\b/.test(c)) { style.show_mean = !neg; say(neg ? "Mean marker off" : "Mean marked with a diamond"); }
+      }
+      if (done()) continue;
 
       // Actions: export, copy, save
       {
@@ -283,10 +310,13 @@
           [/\b(professional|publication[- ]ready|publishable|paper|journal|publication|manuscript|scientific|academic|nature|science|cell)\b/, "journal"],
           [/\b(elegant|fancy|magazine|sophisticated|classy|refined|editorial)\b/, "editorial"],
           [/\b(playful|fun|cute|friendly|cartoon|casual|sketchy|hand[- ]?drawn)\b/, "sketch"],
-          [/\b(retro|vintage|old[- ]?school|old[- ]fashioned)\b/, "typewriter"],
+          [/\b(retro|vintage)\b/, "retro"],
+          [/\b(old[- ]?school|old[- ]fashioned|typed)\b/, "typewriter"],
+          [/\b(blueprint|technical|engineering)\b/, "blueprint"],
+          [/\b(vibrant|bubbly|poppy)\b/, "pop"],
           [/\b(modern|sleek|minimalist|airy|tufte)\b/, "minimal"],
           [/\b(traditional|prism|graphpad|old[- ]style)\b/, "classic"],
-          [/\b(night|glow(ing|y)?|cyber(punk)?|futuristic|electric)\b/, "neon"],
+          [/\b(night|cyber(punk)?|futuristic|electric)\b/, "neon"],
           [/\b(posters?|conference)\b/, "poster"],
           [/\b(slides?|presentation|power ?point|keynote|talk|lecture|projector)\b/, "slides"],
           [/\b(gentle|calm|soothing)\b/, "soft"],
@@ -437,6 +467,14 @@
           if ((m = c.match(/\b(ic50|ec50|ed50)\b/)) && /\b(call|label|name|use|it'?s|is)\b/.test(c) && !/\b(line|marker|hide|show)\b/.test(c)) { settings.ec_label = m[1].toUpperCase(); say("Midpoint called " + settings.ec_label); }
           if (/\b(ic50|ec50|ed50|midpoint) (lines?|markers?|guides?)\b/.test(c)) { settings.show_ec50 = !NEG.test(c); say(settings.show_ec50 ? "Midpoint marked" : "Midpoint marker hidden"); }
           if (/\b(every|all|each|individual) (replicates?|points|values)\b/.test(c)) { settings.all_points = !NEG.test(c); say(settings.all_points ? "Every replicate shown" : "Mean ± error shown"); }
+        } else if (ctx.analysis === "survival") {
+          if (/\b(number|numbers|n) at risk\b|\bat[- ]risk\b|\brisk table\b/.test(c)) { settings.at_risk = !NEG.test(c); say(settings.at_risk ? "Number at risk shown" : "Number at risk hidden"); }
+          if (/\b(confidence|ci) (bands?|intervals?|shading|regions?)\b|\bshaded bands?\b|\bbands?\b/.test(c) && !/\bopacity|transparen/.test(c)) { settings.show_ci = !NEG.test(c); say(settings.show_ci ? "Confidence bands shown" : "Confidence bands hidden"); }
+          if (/\bcensor(ed|ing|s)?\b/.test(c)) { settings.show_censors = !NEG.test(c); say(settings.show_censors ? "Censored subjects marked" : "Censor marks hidden"); }
+          if (/\bmedian\b/.test(c)) { settings.show_median = !NEG.test(c); say(settings.show_median ? "Median survival marked" : "Median lines hidden"); }
+          if (/\b(proportions?|probabilit(y|ies)|fractions?|0 to 1)\b/.test(c)) { settings.y_scale = "prop"; say("Survival as a proportion"); }
+          else if (/\b(percent(age)?s?|%)\b/.test(c) && !/\bwide|tall|bigger|smaller\b/.test(c)) { settings.y_scale = "pct"; say("Survival as a percentage"); }
+          if ((m = c.match(/\b(?:time|unit|units)\b(?: is| are)?(?: in)? (seconds|minutes|hours|days|weeks|months|years)\b/))) { settings.time_unit = m[1]; say("Time in " + m[1]); }
         }
         if (done()) continue;
       }

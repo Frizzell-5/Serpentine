@@ -9,10 +9,10 @@ let pass=0, fail=0;
 function run(cmd, check, opts={}) {
   const style = {grid:"none", legend:"best", groups:{}, palette:"serpentine", ...(opts.style||{})};
   const settings = {band:"sem", ...(opts.settings||{})};
-  let preset=null, undone=false, reset=false, action=null, redone=false;
+  let preset=null, undone=false, reset=false, action=null, redone=false, surprised=false;
   const res = interpretCommand(cmd, {style, settings, analysis: opts.analysis||"compare", groups: opts.groups||groups, columns: opts.columns||[], colormaps: CMAPS, parseColor,
-    applyPreset:(n)=>{preset=n; return true;}, undo:()=>{undone=true;}, resetStyle:()=>{reset=true;}, redo:()=>{redone=true;}, action:(n,a)=>{action=n+(a?":"+a:"");}});
-  let ok; try { ok = check(style, {res, preset, undone, reset, settings, action, redone}); } catch(e) { ok=false; }
+    applyPreset:(n)=>{preset=n; return true;}, undo:()=>{undone=true;}, resetStyle:()=>{reset=true;}, redo:()=>{redone=true;}, action:(n,a)=>{action=n+(a?":"+a:"");}, surprise:()=>{surprised=true;}});
+  let ok; try { ok = check(style, {res, preset, undone, reset, settings, action, redone, surprised}); } catch(e) { ok=false; }
   if (ok) pass++; else { fail++; console.log("FAIL:", JSON.stringify(cmd), "\n   changes:", res.changes, "\n   unknown:", res.unknown, "\n   style:", JSON.stringify(Object.fromEntries(Object.entries(style).filter(([k,v])=>!["legend","palette"].includes(k)||v!=={legend:"best",palette:"serpentine"}[k])))); }
 }
 const G = (s,n) => (s.groups[n]||{});
@@ -154,7 +154,8 @@ run("remove gridlines and make Saline red", s=>s.grid==="none" && G(s,"Saline").
 run("horizontal violin, dark background, font size 12, hide the legend", s=>s.orientation==="horizontal"&&s.plot_kind==="violin"&&s.theme==="dark"&&s.font_size===12&&s.legend==="none");
 run("remove the top and right axes then add minor ticks", s=>!s.spine_top&&!s.spine_right&&s.minor_ticks, {style:{spine_top:true,spine_right:true}});
 // unknowns
-run("make it pop", (s,x)=>x.res.unknown.length===1 && x.res.changes.length===0);
+run("make it pop", (s,x)=>x.preset==="pop");
+run("make it sparkle", (s,x)=>x.res.unknown.length===1 && x.res.changes.length===0);
 run("make the error bars black", (s,x)=>!G(s,"Saline").color && x.res.unknown.length===1);
 run("make the axes thicker", s=>s.axis_width>0.9 && !G(s,"Saline").color);
 run("make the title red", (s,x)=>!G(s,"Saline").color);
@@ -201,7 +202,7 @@ run("style it for a poster", (s,x)=>x.preset==="poster");
 run("for my presentation", (s,x)=>x.preset==="slides");
 run("make it look like prism", (s,x)=>x.preset==="classic");
 run("make it elegant", (s,x)=>x.preset==="editorial");
-run("make it look retro", (s,x)=>x.preset==="typewriter");
+run("make it look retro", (s,x)=>x.preset==="retro");
 run("make it simple", (s,x)=>x.preset==="clean");
 // everything / readability
 run("make everything bigger", s=>s.font_size===12 && s.marker_size>5 && s.line_width>1.5);
@@ -315,5 +316,40 @@ run("values from fasting glucose", (s,x)=>x.settings.value_col==="Fasting glucos
 const WC = [{name:"Vehicle",kind:"number"},{name:"Drug 10 mg/kg",kind:"number"},{name:"Drug 30 mg/kg",kind:"number"}];
 run("only vehicle and drug 30", (s,x)=>JSON.stringify(x.settings.columns)==='["Vehicle","Drug 30 mg/kg"]', {analysis:"compare", columns: WC, groups: groups3, settings:{layout:"wide"}});
 run("use all columns", (s,x)=>Array.isArray(x.settings.columns) && x.settings.columns.length===0, {analysis:"compare", columns: WC, settings:{layout:"wide", columns:["Vehicle"]}});
+
+// v0.7: effects, new looks, surprise, survival
+run("rounded bars", s=>s.bar_shape==="rounded");
+run("round the corners of the bars", s=>s.bar_shape==="rounded");
+run("square corners", s=>s.bar_shape==="square", {style:{bar_shape:"rounded"}});
+run("add drop shadows", s=>s.shadow==="drop");
+run("remove the shadows", s=>s.shadow==="none", {style:{shadow:"drop"}});
+run("make it glow", s=>s.shadow==="glow");
+run("no glow", s=>s.shadow==="none", {style:{shadow:"glow"}});
+run("striped background", s=>s.stripes===true);
+run("zebra stripes", s=>s.stripes===true);
+run("remove the background stripes", s=>s.stripes===false, {style:{stripes:true}});
+run("striped bars for Saline", s=>G(s,"Saline").hatch && !s.stripes);
+run("show the means above the bars", s=>s.value_labels==="mean");
+run("put the median on top of each group", s=>s.value_labels==="median");
+run("label the bars", s=>s.value_labels==="mean");
+run("remove the value labels", s=>s.value_labels==="none", {style:{value_labels:"mean"}});
+run("show n under each group", s=>s.show_n===true && !s.value_labels);
+run("notched boxes", s=>s.box_notch===true && s.plot_kind==="box");
+run("mark the mean", s=>s.show_mean===true);
+run("surprise me", (s,x)=>x.surprised);
+run("shuffle the style", (s,x)=>x.surprised);
+run("rounded bars and add shadows", s=>s.bar_shape==="rounded" && s.shadow==="drop");
+run("jewel tones", s=>s.palette==="jewel");
+run("use candy colors", s=>s.palette==="candy");
+run("retro colors", s=>s.palette==="retro");
+run("blueprint style", (s,x)=>x.preset==="blueprint");
+run("show the number at risk", (s,x)=>x.settings.at_risk===true, {analysis:"survival"});
+run("hide the confidence band", (s,x)=>x.settings.show_ci===false, {analysis:"survival"});
+run("hide censor marks", (s,x)=>x.settings.show_censors===false, {analysis:"survival"});
+run("show the median", (s,x)=>x.settings.show_median===true, {analysis:"survival"});
+run("show as proportion", (s,x)=>x.settings.y_scale==="prop", {analysis:"survival"});
+run("time in weeks", (s,x)=>x.settings.time_unit==="weeks", {analysis:"survival"});
+run("violin plot", (s,x)=>x.res.unknown.length===1, {analysis:"survival"});
+run("dark background", s=>s.theme==="dark", {analysis:"survival"});
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

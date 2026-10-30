@@ -117,6 +117,7 @@ const DEFAULT_SETTINGS = {
   },
   correlation: { dataset: "", x_col: "", y_col: "", group_col: "", group_order: "", method: "pearson", fit: true, ci: true, annotate: true },
   dose: { dataset: "", x_col: "", x_unit: "", x_scale: 1, mode: "curves", y_cols: [], curve_name: "Response", fix_bottom: "", fix_top: "", show_ec50: true, all_points: false, ec_label: "" },
+  survival: { dataset: "", time_col: "", event_col: "", group_col: "", group_order: "", time_unit: "", y_scale: "pct", show_ci: true, show_censors: true, show_median: false, at_risk: false },
 };
 
 // Everything about the look of a figure. Quick styles reset these and nothing else.
@@ -133,6 +134,7 @@ const LOOK_DEFAULTS = {
   spine_left: true, spine_bottom: true, spine_top: false, spine_right: false,
   offset_axes: 0, trim_axes: false, tick_dir: "out", tick_length: 3.5, minor_ticks: false, cat_ticks: false,
   grid: "none", grid_style: "solid", grid_alpha: 0.15, legend: "best", legend_frame: false, legend_cols: 1,
+  bar_shape: "square", shadow: "none", stripes: false, value_labels: "none", box_notch: false, show_mean: false,
 };
 const DEFAULT_STYLE = {
   ...LOOK_DEFAULTS,
@@ -151,6 +153,11 @@ const PALETTES = [
   ["ocean", "Ocean", ["#023E8A", "#0096C7", "#48CAE4", "#03045E", "#00B4D8", "#90E0EF"]],
   ["sunset", "Sunset", ["#3D348B", "#F18701", "#7678ED", "#F35B04", "#F7B801", "#9B2226"]],
   ["neon", "Neon", ["#00F5D4", "#F15BB5", "#FEE440", "#00BBF9", "#9B5DE5", "#F72585"]],
+  ["vivid", "Vivid", ["#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F", "#8491B4"]],
+  ["jewel", "Jewel", ["#1B4965", "#9E2A2B", "#2D6A4F", "#7B2CBF", "#C9A227", "#0F7173"]],
+  ["retro", "Retro", ["#E07A5F", "#3D405B", "#81B29A", "#F2CC8F", "#6D597A", "#B56576"]],
+  ["candy", "Candy", ["#FF6B9A", "#5CC8FF", "#FFC145", "#8E7DFF", "#3DDC97", "#FF8C61"]],
+  ["forest", "Forest", ["#264027", "#6F732F", "#B38A58", "#3B6064", "#55828B", "#87BBA2"]],
   ["grayscale", "Grayscale", ["#1F1F1F", "#8A8A8A", "#C4C4C4", "#525252", "#A8A8A8", "#6E6E6E"]],
 ];
 const COLORMAPS = [
@@ -179,9 +186,48 @@ const PRESETS = [
   { name: "Soft", desc: "Pastel with grid", v: { width: 4.2, palette: "pastel", fill: "solid", grid: "both", line_width: 1.3, font: "lato" } },
   { name: "Poster", desc: "Large type", v: { width: 6.5, height: 5, font_size: 18, line_width: 2.6, marker_size: 8, palette: "tol", fill: "solid", font: "poppins" } },
   { name: "Slides", desc: "Dark background", v: { width: 6.4, height: 4.2, font_size: 14, line_width: 2, marker_size: 6.5, palette: "tol", theme: "dark", font: "barlow" } },
-  { name: "Neon", desc: "Glow on black", v: { theme: "dark", bg_color: "#0B0B12", palette: "neon", fill: "light", fill_alpha: 0.12, line_width: 2, font: "spacemono", point_edge: "none" } },
+  { name: "Neon", desc: "Glow on black", v: { theme: "dark", bg_color: "#0B0B12", palette: "neon", fill: "light", fill_alpha: 0.12, line_width: 2, font: "spacemono", point_edge: "none", shadow: "glow" } },
   { name: "Sketch", desc: "Playful", v: { font: "comic", font_size: 11, palette: "sunset", fill: "light", fill_alpha: 0.35, line_width: 2.2, marker_size: 6, cap_size: 0 } },
+  { name: "Pop", desc: "Rounded, with shadows", v: { font: "poppins", palette: "candy", fill: "solid", bar_shape: "rounded", shadow: "drop", value_labels: "mean", spine_left: false, tick_length: 0, grid: "y", grid_style: "dotted", grid_alpha: 0.35, point_edge: "#ffffff", point_edge_width: 0.8 } },
+  { name: "Blueprint", desc: "White on navy", v: { theme: "dark", bg_color: "#0E2A47", axes_color: "#0E2A47", ink_color: "#DCE9F7", palette: "pastel", font: "spacemono", fill: "outline", grid: "both", grid_style: "dashed", grid_alpha: 0.22, line_width: 1.4, point_edge: "none", spine_top: true, spine_right: true } },
+  { name: "Zebra", desc: "Striped background", v: { font: "lato", palette: "jewel", stripes: true, fill: "light", fill_alpha: 0.35, show_mean: true, spine_left: false, tick_length: 0 } },
+  { name: "Retro", desc: "Cream paper, warm ink", v: { bg_color: "#F4EFE6", axes_color: "#F4EFE6", ink_color: "#3D405B", palette: "retro", font: "ptserif", fill: "solid", line_width: 2, axis_width: 1.6, bar_shape: "rounded", offset_axes: 6, trim_axes: true } },
 ];
+
+// "Surprise me": a random but coherent look, so no two figures have to look alike.
+const pick = (list) => list[Math.floor(Math.random() * list.length)];
+function surpriseLook() {
+  const dark = Math.random() < 0.22;
+  const papers = ["", "", "", "#F4EFE6", "#F7F7F2", "#EEF3F8", "#FBF6EF"];
+  const nights = ["", "#0B0B12", "#0E2A47", "#1B1B1F", "#14213D"];
+  const fonts = FONT_OPTIONS.flatMap(([, list]) => list.map(([v]) => v));
+  // Palettes that stay readable on the chosen background
+  const palettes = dark
+    ? ["neon", "pastel", "candy", "tol", "okabe", "vivid", "cmap:Set2", "cmap:plasma", "cmap:spring", "cmap:Pastel1"]
+    : PALETTES.map(([k]) => k).filter((k) => k !== "grayscale" && k !== "neon").concat(["cmap:viridis", "cmap:Set2", "cmap:Dark2", "cmap:cividis", "cmap:tab10"]);
+  const bg = dark ? pick(nights) : pick(papers);
+  const boxed = Math.random() < 0.25;
+  const v = {
+    theme: dark ? "dark" : "light", bg_color: bg, axes_color: bg,
+    font: pick(fonts), font_size: pick([9, 10, 10, 11, 12]), title_align: pick(["left", "center", "center"]),
+    palette: pick(palettes), palette_reverse: Math.random() < 0.2,
+    fill: pick(["light", "light", "solid", "outline"]), fill_alpha: pick([0.2, 0.3, 0.45]),
+    bar_shape: pick(["square", "square", "rounded"]), bar_width: pick([0.5, 0.62, 0.72]),
+    shadow: dark ? pick(["none", "glow", "glow"]) : pick(["none", "none", "drop"]),
+    stripes: Math.random() < 0.2, value_labels: pick(["none", "none", "none", "mean"]),
+    point_shape: pick(["o", "o", "o", "s", "D", "^", "h"]), marker_size: pick([4, 5, 6]), point_alpha: pick([0.7, 0.85, 1]),
+    point_edge: pick(["auto", "none", "dark", "ink"]),
+    line_width: pick([1, 1.3, 1.5, 2, 2.4]), cap_size: pick(["", "", 0, 6]), error_dir: pick(["both", "both", "up"]),
+    spine_top: boxed, spine_right: boxed, spine_left: boxed || Math.random() < 0.8,
+    offset_axes: boxed ? 0 : pick([0, 0, 5, 8]), trim_axes: !boxed && Math.random() < 0.35,
+    tick_dir: boxed ? pick(["in", "out"]) : pick(["out", "out", "in"]), minor_ticks: boxed && Math.random() < 0.5,
+    grid: pick(["none", "none", "y", "both"]), grid_style: pick(["solid", "dashed", "dotted"]), grid_alpha: pick([0.12, 0.2, 0.3]),
+    legend_frame: Math.random() < 0.25, show_mean: Math.random() < 0.3,
+  };
+  if (!v.spine_left) v.tick_length = 0;
+  if (v.stripes) v.grid = "none";
+  return v;
+}
 
 const CODE_EXAMPLES = [
   ["Custom ticks", "ax.set_yticks([0, 250, 500, 750, 1000])"],
@@ -199,6 +245,8 @@ const ANALYSES = [
     icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45"/><path d="M20 4v33" stroke-dasharray="3 3" stroke-width="1.5"/><path d="M4 12l4 1 4-1 4 1 4-1c4 0 5 14 11 17s8 2 12 2 5-1 5-1" stroke-linejoin="round"/></svg>' },
   { id: "correlation", title: "Correlation & regression", desc: "Does one measurement track another? Pearson or Spearman, linear fit and confidence band, by group.",
     icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45M4 37V3"/><path d="M8 32L46 8" stroke-width="1.6"/><g fill="currentColor" stroke="none"><circle cx="12" cy="27" r="2.4"/><circle cx="19" cy="26" r="2.4"/><circle cx="24" cy="19" r="2.4"/><circle cx="31" cy="20" r="2.4"/><circle cx="37" cy="12" r="2.4"/><circle cx="43" cy="13" r="2.4"/></g></svg>' },
+  { id: "survival", title: "Survival curve", desc: "Time until death, relapse or any event. Kaplan-Meier curves with censoring, median survival, log-rank test and hazard ratio.",
+    icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45M4 37V3"/><path d="M6 6h9v6h7v7h6v6h9v5h9" stroke-linejoin="round"/><path d="M18 9v6M33 22v6" stroke-width="1.5"/></svg>' },
   { id: "dose", title: "Dose-response curve", desc: "Concentration series fitted with a 4-parameter logistic model. EC50 or IC50 with confidence intervals.",
     icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45M4 37V3"/><path d="M6 8c10 0 13 1 18 12s9 12 22 12" stroke-linejoin="round"/><path d="M24 20v17" stroke-dasharray="2.5 2.5" stroke-width="1.4"/></svg>' },
 ];
@@ -229,7 +277,7 @@ const openSections = store(SECTIONS_KEY) || {};
 // Python engine (web worker)
 // ============================================================================
 const servedFromDisk = location.protocol === "file:";
-const worker = servedFromDisk ? null : new Worker("worker.js");
+const worker = servedFromDisk ? null : new Worker("worker.js?v=0.7.0");
 let engineReady = false;
 let reqId = 0;
 const pending = new Map();
@@ -458,7 +506,7 @@ function renderUndo() {
   $("#btn-redo").disabled = !history.future.length;
 }
 
-const COLUMN_KEYS = ["dataset", "columns", "value_col", "group_col", "group_order", "y_name", "time_col", "filter_col", "filter_min", "filter_max", "x_col", "y_col", "y_cols", "curve_name", "x_unit"];
+const COLUMN_KEYS = ["dataset", "columns", "value_col", "group_col", "group_order", "y_name", "time_col", "event_col", "filter_col", "filter_min", "filter_max", "x_col", "y_col", "y_cols", "curve_name", "x_unit"];
 function forgetExampleColumns() {
   // The example's column names and group colours mean nothing for the user's own table.
   for (const [kind, defaults] of Object.entries(DEFAULT_SETTINGS)) {
@@ -624,7 +672,7 @@ function fieldHTML(f, obj, scope) {
     }
     case "presets": {
       const mine = store(STYLES_KEY) || [];
-      return `<div class="presets">${PRESETS.map((p, i) => `<button type="button" class="preset" data-preset="${i}"><b>${esc(p.name)}</b><small>${esc(p.desc)}</small></button>`).join("")}</div>
+      return `<div class="presets">${PRESETS.map((p, i) => `<button type="button" class="preset" data-preset="${i}"><b>${esc(p.name)}</b><small>${esc(p.desc)}</small></button>`).join("")}<button type="button" class="preset preset-surprise" data-surprise="1"><b>Surprise me</b><small>A new random look</small></button></div>
         ${mine.length ? `<span class="field-label">My styles</span><div class="presets">${mine.map((p, i) => `<div class="preset mine"><button type="button" data-mystyle="${i}"><b>${esc(p.name)}</b><small>Saved style</small></button><button type="button" class="x" data-delstyle="${i}" aria-label="Delete ${esc(p.name)}">×</button></div>`).join("")}</div>` : ""}
         <div class="save-style"><input type="text" id="mystyle-name" placeholder="Name this look, e.g. Lab house style" spellcheck="false"><button type="button" class="btn btn-small" id="btn-save-style">Save style</button></div>
         <div class="btn-row"><button type="button" class="btn btn-small" id="btn-export-style">Export style file</button><button type="button" class="btn btn-small" id="btn-import-style">Import style file</button><button type="button" class="btn btn-small btn-danger" id="btn-reset-style">Reset all styling</button><input type="file" id="import-style" accept=".json" hidden></div>
@@ -765,6 +813,7 @@ function bindForm(panel, getObj, rerender) {
     }
     const p = t.closest("[data-preset]");
     if (p) return applyLook(PRESETS[+p.dataset.preset].v, PRESETS[+p.dataset.preset].name);
+    if (t.closest("[data-surprise]")) return applyLook(surpriseLook(), "Random");
     const ms = t.closest("[data-mystyle]");
     if (ms) {
       const mine = store(STYLES_KEY) || [];
@@ -956,13 +1005,32 @@ const SETTINGS_SCHEMA = {
       tog("all_points", "Show every replicate instead of mean ± error"),
     ];
   },
+  survival: (s) => {
+    const c = columnsFor(s.dataset);
+    const pickCol = (key, label, names, hint, noneLabel) => sel(key, label, [["", "Automatic"], ["__none__", noneLabel]].concat(names.map((n) => [n, n])), { hint });
+    return [
+      sec("Data"),
+      datasetField(),
+      note("One row per subject: the time it died or was last seen, whether the event happened, and its group."),
+      row(col("time_col", "Time column", c.numeric), txt("time_unit", "Time unit", { placeholder: "e.g. days" })),
+      pickCol("event_col", "Event column", c.all, "1, yes or dead = the event happened. 0, alive or censored = still alive or lost to follow-up.", "None (every subject had the event)"),
+      pickCol("group_col", "Group column", c.all, "", "None (one curve)"),
+      s.group_col !== "__none__" && txt("group_order", "Group order", { placeholder: "e.g. Control, Treated" }),
+      sec("Display"),
+      seg("y_scale", "Survival as", [["pct", "Percent"], ["prop", "Proportion"]]),
+      tog("show_ci", "Shade the 95% confidence band"),
+      tog("show_censors", "Mark censored subjects with ticks"),
+      tog("show_median", "Draw lines to the median survival"),
+      tog("at_risk", "Show the number at risk under the plot"),
+    ];
+  },
 };
 
 function styleSchema() {
   const s = state.style;
   const a = state.analysis;
   const groupPlot = a === "compare" || a === "timecourse";
-  const lines = a === "timecourse" || a === "dose" || a === "correlation";
+  const lines = a === "timecourse" || a === "dose" || a === "correlation" || a === "survival";
   const horizontal = groupPlot && s.orientation === "horizontal";
   const mm = (v) => Math.round(parseFloat(v || 0) * 25.4);
   const dark = s.theme === "dark";
@@ -975,6 +1043,10 @@ function styleSchema() {
     groupPlot && row(num("bar_width", "Bar / box width", { placeholder: "0.62", hint: "0.05 to 1" }), num("jitter", "Point spread", { placeholder: "0.12", hint: "0 = in a line" })),
     groupPlot && seg("fill", "Fill", [["light", "Light"], ["solid", "Solid"], ["outline", "Outline"]]),
     groupPlot && row(s.fill === "light" && num("fill_alpha", "Fill opacity", { placeholder: "0.25" }), num("edge_width", "Outline width", { placeholder: "auto" })),
+    groupPlot && s.plot_kind === "bar" && seg("bar_shape", "Bar corners", [["square", "Square"], ["rounded", "Rounded"]]),
+    groupPlot && s.plot_kind === "box" && tog("box_notch", "Notched boxes", "The notch shows a 95% interval around the median."),
+    groupPlot && ["box", "violin", "boxviolin", "raincloud", "beeswarm", "strip"].includes(s.plot_kind) && tog("show_mean", "Mark the mean with a diamond"),
+    groupPlot && sel("value_labels", "Numbers above each group", [["none", "None"], ["mean", "Mean"], ["median", "Median"], ["n", "Sample size (n)"]]),
     sec("Groups"),
     note("Rename any group, or give it its own color, marker, fill pattern and line style."),
     { type: "groups" },
@@ -996,7 +1068,7 @@ function styleSchema() {
     row(num("cap_size", "Cap width", { placeholder: "auto", hint: "0 = no caps" }), num("error_width", "Error bar width", { placeholder: "auto" })),
     lines && tog("line_markers", "Markers on lines"),
     a === "timecourse" && row(num("band_alpha", "Band opacity", { placeholder: "0.18" }), num("trace_alpha", "Session line opacity", { placeholder: "0.35" })),
-    a === "correlation" && num("band_alpha", "Confidence band opacity", { placeholder: "0.18" }),
+    (a === "correlation" || a === "survival") && num("band_alpha", "Confidence band opacity", { placeholder: "0.18" }),
     groupPlot && sec("Significance"),
     groupPlot && sel("sig", "Show results as", [["stars", "Stars (*, **, ***)"], ["p", "Exact p-values"], ["none", "Hide"]]),
     groupPlot && row(tog("show_ns", "Mark non-significant"), num("sig_size", "Text size", { placeholder: "auto" })),
@@ -1027,6 +1099,9 @@ function styleSchema() {
     row(num("ytick_step", "Y tick spacing"), num("xtick_step", "X tick spacing")),
     row(num("y_nticks", "About how many Y ticks"), num("x_nticks", "About how many X ticks")),
     num("y_decimals", "Decimal places on the value axis"),
+    sec("Effects"),
+    seg("shadow", "Depth", [["none", "Flat"], ["drop", "Drop shadow"], ["glow", "Glow"]]),
+    tog("stripes", "Striped background", groupPlot ? "Alternating bands behind the groups." : "Alternating bands between the value-axis ticks."),
     sec("Grid and reference lines"),
     seg("grid", "Gridlines", [["none", "None"], ["y", "Horizontal"], ["x", "Vertical"], ["both", "Both"]]),
     s.grid !== "none" && row(sel("grid_style", "Grid line style", [["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"]]), num("grid_alpha", "Grid opacity", { placeholder: "0.15" })),
@@ -1293,7 +1368,7 @@ function renderResults(out) {
 // Exports
 // ============================================================================
 async function getEngineSource() {
-  if (!engineSource) engineSource = await (await fetch("engine/serpentine.py")).text();
+  if (!engineSource) engineSource = await (await fetch("engine/serpentine.py", { cache: "no-cache" })).text();
   return engineSource;
 }
 
@@ -1414,6 +1489,7 @@ const COMMAND_HELP = [
   ["Axes", ["remove the top and right axes", "box around the plot", "floating axes", "y axis from 0 to 1000", "log scale", "ticks inside", "rotate the labels 45"]],
   ["Stats marks", ["show exact p values", "hide the stars", "show n under each group", "use SD", "no caps on error bars"]],
   ["Size & more", ["6 by 4 inches", "89 mm wide", "make it bigger", "landscape", "reference line at 100", "fewer ticks"]],
+  ["New looks", ["surprise me", "rounded bars", "add drop shadows", "make it glow", "striped background", "show the means above the bars", "notched boxes", "mark the mean"]],
   ["Overall look", ["make it look professional", "make it playful", "for my presentation", "make it look modern", "make everything bigger", "warmer colors"]],
   ["Group order & shades", ["put Treated first", "reverse the group order", "swap the colors", "make Control lighter", "italicize the group names"]],
   ["Actions", ["export as pdf", "copy the figure", "save my project", "undo", "redo"]],
@@ -1423,6 +1499,7 @@ const ANALYSIS_HELP = {
   compare: ["Statistics", ["percent of control", "paired", "use a nonparametric test", "compare everything to the control", "all pairwise comparisons", "group by genotype", "only Control and Treated"]],
   correlation: ["Statistics", ["plot glucose against weight", "color by genotype", "use spearman", "hide the fit line", "remove the confidence band"]],
   dose: ["Curve fit", ["fix the bottom at 0", "fix top at 100", "call it IC50", "show every replicate"]],
+  survival: ["Survival", ["show the number at risk", "hide the confidence band", "show the median", "hide censor marks", "show as proportion", "time in weeks"]],
 };
 
 function commandExamples() {
@@ -1467,6 +1544,7 @@ function runCommand(text) {
       Object.assign(state.style, clone(LOOK_DEFAULTS), p.v);
       return true;
     },
+    surprise: () => Object.assign(state.style, clone(LOOK_DEFAULTS), surpriseLook()),
     resetStyle: () => {
       const keep = { plot_kind: state.style.plot_kind, orientation: state.style.orientation };
       for (const k of Object.keys(state.style)) delete state.style[k];
@@ -1498,8 +1576,10 @@ function runCommand(text) {
   const fb = $("#command-feedback");
   fb.innerHTML = res.changes.map((c) => `<span class="cmd-chip">✓ ${esc(c)}</span>`).join("")
     + res.unknown.map((u) => {
+      const why = u.match(/^(.*) \(([^()]+)\)$/); // "phrase (reason it can't apply here)"
+      if (why) return `<span class="cmd-chip miss">Can't apply “${esc(why[1])}” here: ${esc(why[2])}.</span>`;
       const ideas = suggestCommands(u, phrases, 3);
-      return `<span class="cmd-chip miss">Didn't understand “${esc(u)}”.${ideas.length ? " Did you mean:" : " See “What can I say?” or use the Style step."}</span>`
+      return `<span class="cmd-chip miss">Didn't understand “${esc(u)}”.${ideas.length ? " Did you mean: " : " See “What can I say?” or use the Style step."}</span>`
         + ideas.map((i) => `<button type="button" class="cmd-suggest" data-cmd="${esc(i)}">${esc(i)}</button>`).join("");
     }).join("");
   if (res.changes.length && !res.unknown.length) $("#command-input").value = "";
