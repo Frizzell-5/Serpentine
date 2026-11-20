@@ -27,6 +27,14 @@ Serpentine is a browser-based analysis tool for researchers. You paste or upload
 | **Correlation & regression** | Pearson or Spearman correlation, least-squares linear fit with 95% confidence band, optionally split by group. |
 | **Survival** | Kaplan-Meier curves with censoring marks and 95% confidence bands (log-log), median survival with 95% CI, log-rank (Mantel-Cox) test, Holm-adjusted pairwise log-rank tests for 3+ groups, hazard ratio for 2 groups, optional number-at-risk table. |
 | **Dose-response** | Four-parameter logistic fit on log concentration, EC50/IC50 with 95% confidence intervals, Hill slope, R², optional fixed top or bottom, multiple curves or replicates. |
+| **Two-way ANOVA** | Two factors (e.g. genotype × treatment) with interaction, Type III sums of squares, partial η², optional log/sqrt transform, Šidák comparisons within each level or Tukey across all combinations, grouped plots. Long or Prism-style grouped tables. |
+| **Counts & proportions** | Fisher's exact or chi-square test (with expected-count checks), Cramér's V; for 2 × 2 tables the odds ratio, relative risk and risk difference with 95% CIs. Stacked-percent, stacked or side-by-side bars. |
+| **Curve fitting** | 16 models (Michaelis-Menten, Hill and one-site binding, one/two-phase decay and association, exponential, logistic and Gompertz growth, Boltzmann, Gaussian, power, polynomials) or a custom equation. Parameter CIs, R², AICc, derived half-lives and doubling times, weighting, confidence bands, residual plots with a runs test, and extra sum-of-squares F tests comparing curves or a single parameter. |
+| **Standard curve** | ELISA, BCA, Bradford or any assay: linear, through-origin, quadratic, log-log, 4PL or 5PL fits with optional 1/Y or 1/Y² weighting; blank subtraction; interpolated unknowns with dilution factors; flags for out-of-range samples and high replicate CV; back-calculated standard recovery; LOD/LOQ from blanks. |
+| **qPCR gene expression** | Ct to fold change by 2^-ΔΔCt or Pfaffl (gene-specific efficiencies); automatic reference-gene detection and geometric averaging of several; technical-replicate QC; Undetermined wells; reference-gene stability check; statistics on log2 fold change. Reads instrument exports directly. |
+| **Sample size & power** | No data needed. Required n, achieved power or minimum detectable effect for two groups, paired designs, one-way ANOVA, two proportions and correlations (exact noncentral t/F), with dropout and a methods-ready justification. |
+
+Compare groups can also flag or remove outliers (Grubbs' test or Tukey's fences), and its descriptive table includes the CV.
 
 ## Output
 
@@ -35,6 +43,7 @@ Serpentine is a browser-based analysis tool for researchers. You paste or upload
 - An auto-generated **methods paragraph** naming the tests, corrections and software versions used
 - A **Python script** that reproduces the full analysis
 - Project files (`.serpentine.json`) to save and reopen your work
+- **Figure board:** combine figures from any analyses into one multi-panel figure at journal widths, lettered A, B, C, exported as PNG, TIFF, PDF or editable SVG
 
 ## Getting started
 
@@ -91,15 +100,13 @@ python3 -m venv .venv && .venv/bin/pip install numpy scipy pandas matplotlib ope
 
 ## Roadmap
 
-- Multi-panel figure layouts (A/B/C/D) for journal submission
-- Plain-language figure editing ("make the drug group red, hide the legend")
+- Repeated-measures and mixed-model two-way ANOVA
 - Axis breaks and inset plots
-- Survival curves, two-way ANOVA, normalization tools
 - Direct import of LabChart `.adicht` files
 
 ## Status
 
-Serpentine is in early development (v0.7). Results should be checked against your own understanding of the statistics before publication; the generated methods text is a starting point, not a substitute for describing what you did.
+Serpentine is in early development (v0.8). Results should be checked against your own understanding of the statistics before publication; the generated methods text is a starting point, not a substitute for describing what you did.
 
 ## Author
 

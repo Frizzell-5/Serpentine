@@ -240,7 +240,7 @@
     const style = ctx.style;
     const settings = ctx.settings || {};
     const groups = ctx.groups || [];
-    const groupPlot = ctx.analysis === "compare" || ctx.analysis === "timecourse";
+    const groupPlot = ["compare", "timecourse", "twoway", "qpcr"].includes(ctx.analysis);
     const changes = [];
     const unknown = [];
     const say = (msg) => changes.push(msg);
@@ -475,6 +475,66 @@
           if (/\b(proportions?|probabilit(y|ies)|fractions?|0 to 1)\b/.test(c)) { settings.y_scale = "prop"; say("Survival as a proportion"); }
           else if (/\b(percent(age)?s?|%)\b/.test(c) && !/\bwide|tall|bigger|smaller\b/.test(c)) { settings.y_scale = "pct"; say("Survival as a percentage"); }
           if ((m = c.match(/\b(?:time|unit|units)\b(?: is| are)?(?: in)? (seconds|minutes|hours|days|weeks|months|years)\b/))) { settings.time_unit = m[1]; say("Time in " + m[1]); }
+        } else if (ctx.analysis === "twoway") {
+          if (/\b(log|log10|logarithm(ic)?) (transform|scale the (data|values))\b|\blog[- ]?transform/.test(c) && !NEG.test(c)) { settings.transform = "log10"; say("Values log10-transformed before the ANOVA"); }
+          else if (/\b(no|remove|undo|don'?t) (log )?transform/.test(c)) { settings.transform = "none"; say("No transform"); }
+          if (/\bwithin each\b|\bcompare (treatments|columns)\b/.test(c)) { settings.posthoc = "within_a"; say("Comparisons within each level of the first factor"); }
+          if (/\b(all|every) (pairs?|combinations|comparisons)\b|\btukey\b/.test(c)) { settings.posthoc = "all"; say("Every combination compared (Tukey)"); }
+          if (/\bno (post[- ]?hoc|comparisons|brackets)\b/.test(c)) { settings.posthoc = "none"; say("No post-hoc comparisons"); }
+        } else if (ctx.analysis === "qpcr") {
+          if (/\blog2\b|\blog fold\b/.test(c)) { settings.output = "log2"; say("Shown as log2 fold change"); }
+          else if (/\bfold( change)?\b|\b2\^?-?ddct\b|\bddct\b/.test(c)) { settings.output = "fold"; say("Shown as fold change"); }
+          else if (/\brelative expression\b|\bdct\b|\bdelta ct\b/.test(c)) { settings.output = "dct"; say("Shown as relative expression (2^-ΔCt)"); }
+          if (/\b(all|every) (pairs?|comparisons)\b|\bpairwise\b/.test(c)) { settings.posthoc = "all"; say("Every pair of groups compared"); }
+          else if (/\b(vs\.?|against|with|to) (the )?(control|untreated|first)\b/.test(c)) { settings.posthoc = "control"; say("Each group compared with the control"); }
+          if (/\bnon[- ]?parametric\b|\bmann[- ]?whitney\b/.test(c)) { settings.test = "nonparam"; say("Non-parametric test"); }
+        } else if (ctx.analysis === "stdcurve") {
+          if (/\b5 ?pl\b|\bfive[- ]parameter\b/.test(c)) { settings.model = "5pl"; say("5-parameter logistic fit"); }
+          else if (/\b4 ?pl\b|\bfour[- ]parameter\b|\blogistic\b/.test(c)) { settings.model = "4pl"; say("4-parameter logistic fit"); }
+          else if (/\bquadratic\b|\bpolynomial\b|\bsecond[- ]order\b/.test(c)) { settings.model = "quadratic"; say("Quadratic fit"); }
+          else if (/\bthrough (the )?(origin|zero)\b/.test(c)) { settings.model = "linear0"; say("Straight line through the origin"); }
+          else if (/\blog[- ]?log\b/.test(c)) { settings.model = "loglog"; say("Linear fit on log-log axes"); }
+          else if (/\b(linear|straight line)\b/.test(c)) { settings.model = "linear"; say("Straight-line fit"); }
+          if (/\bsubtract (the )?blanks?\b|\bblank[- ]subtract/.test(c)) { settings.blank = NEG.test(c) ? "none" : "subtract"; say(settings.blank === "subtract" ? "Blank subtracted" : "No blank subtraction"); }
+          if (/\bweight(ed|ing)?\b.*\b1\/y(2|²|\^2| squared)\b/.test(c)) { settings.weight = "1/y2"; say("Weighted 1/Y²"); }
+          else if (/\bweight(ed|ing)?\b.*\b1\/y\b/.test(c)) { settings.weight = "1/y"; say("Weighted 1/Y"); }
+          if ((m = c.match(/\bdilut(?:ion|ed)(?: factor)?\s*(?:of|is|=|:|by|x)?\s*(\d+(?:\.\d+)?)/)) || (m = c.match(/\b(\d+(?:\.\d+)?)\s*(?:x|times|-fold) dilut/))) { settings.dilution = parseFloat(m[1]); say("Dilution factor " + m[1]); }
+          if (/\bguide ?lines?\b|\bdrop ?lines?\b/.test(c)) { settings.guides = !NEG.test(c); say(settings.guides ? "Guide lines shown" : "Guide lines hidden"); }
+        } else if (ctx.analysis === "curvefit") {
+          const MODELS = [[/michaelis|menten|enzyme kinetics/, "mm", "Michaelis-Menten"], [/two[- ]phase/, "exp2_decay", "Two-phase decay"],
+            [/\b(one[- ]phase )?decay|half[- ]life/, "exp_decay", "One-phase decay"], [/association|on[- ]rate/, "exp_assoc", "One-phase association"],
+            [/exponential growth/, "exp_growth", "Exponential growth"], [/gompertz|lag time/, "gompertz", "Gompertz growth"],
+            [/logistic growth|growth curve|bacterial growth/, "logistic", "Logistic growth"], [/\bhill\b|cooperativ/, "hill", "Binding with Hill slope"],
+            [/one[- ]site|total binding|nonspecific/, "one_site", "One-site total binding"], [/boltzmann|activation curve|v50|v1\/2/, "boltzmann", "Boltzmann sigmoid"],
+            [/gaussian|bell|peak fit/, "gaussian", "Gaussian peak"], [/power law/, "power", "Power law"], [/\bcubic\b/, "poly3", "Cubic"],
+            [/quadratic|polynomial/, "poly2", "Quadratic"], [/straight line|linear (fit|regression)/, "linear", "Straight line"]];
+          if (/\b(fit|use|model|switch to|try)\b|\bcurve\b/.test(c) || MODELS.some(([rx]) => rx.test(c))) {
+            const hit = MODELS.find(([rx]) => rx.test(c));
+            if (hit) { settings.model = hit[1]; say("Model: " + hit[2]); }
+          }
+          if (/\bresiduals?\b/.test(c)) { settings.residuals = !NEG.test(c); say(settings.residuals ? "Residual plot shown" : "Residual plot hidden"); }
+          if (/\b(confidence|ci) (band|interval|shading|region)s?\b|\bshaded bands?\b/.test(c)) { settings.band = !NEG.test(c); say(settings.band ? "95% confidence band shown" : "Confidence band hidden"); }
+          if ((m = c.match(/\bcompare (?:the )?(km|vmax|kd|bmax|ec50|k|plateau|half[- ]life|rate)\b/))) { const map = { km: "Km", vmax: "Vmax", kd: "Kd", bmax: "Bmax", k: "K", plateau: "Plateau" }; settings.compare = map[m[1]] || "all"; say("Testing whether " + settings.compare + " differs between curves"); }
+          else if (/\b(do|are) the curves (differ|different)\b|\bcompare (the )?curves\b/.test(c)) { settings.compare = "all"; say("Testing whether the curves differ"); }
+        } else if (ctx.analysis === "contingency") {
+          if (/\bfisher/.test(c)) { settings.test = "fisher"; say("Fisher's exact test"); }
+          else if (/\bchi[- ]?squared?\b|\bχ/.test(c)) { settings.test = "chi2"; say("Chi-square test"); }
+          if (/\byates\b/.test(c)) { settings.yates = !NEG.test(c); say(settings.yates ? "Yates' correction on" : "Yates' correction off"); }
+          if (/\bgrouped bars?\b|\bside by side\b/.test(c)) { settings.display = "grouped"; say("Grouped bars of counts"); }
+          else if (/\bstacked\b.*\b(counts?|numbers)\b|\b(counts?|numbers)\b.*\bstacked\b/.test(c)) { settings.display = "stacked"; say("Stacked counts"); }
+          else if (/\bstacked\b|\b(percent|%)\b.*\bbars?\b/.test(c)) { settings.display = "stacked_pct"; say("Stacked percentages"); }
+          if (/\b(percent(age)?s?|numbers|labels) (in|on) (the )?(bars|segments)\b/.test(c)) { settings.labels = !NEG.test(c); say(settings.labels ? "Numbers in the bars" : "No numbers in the bars"); }
+        } else if (ctx.analysis === "power") {
+          if ((m = c.match(/\b(\d+(?:\.\d+)?)\s*%?\s*power\b/)) || (m = c.match(/\bpower (?:of |=|to |at )?(\d+(?:\.\d+)?)\s*%?/))) { const v = parseFloat(m[1]); settings.power = v > 1 ? v / 100 : v; say(`Power ${Math.round(settings.power * 100)}%`); }
+          if ((m = c.match(/\balpha (?:of |=|to |at )?(0?\.\d+)/)) || (m = c.match(/\b(?:p|significance)(?: level)? (?:<|of|=|at) ?(0?\.\d+)/))) { settings.alpha = parseFloat(m[1]); say("Alpha " + settings.alpha); }
+          if (/\bone[- ](sided|tailed)\b/.test(c)) { settings.sides = "one"; say("One-sided test"); }
+          else if (/\btwo[- ](sided|tailed)\b/.test(c)) { settings.sides = "two"; say("Two-sided test"); }
+          if ((m = c.match(/\b(\d+(?:\.\d+)?)\s*%?\s*(?:dropout|attrition|loss)\b/)) || (m = c.match(/\b(?:dropout|attrition)(?: of| rate)?\s*(\d+(?:\.\d+)?)/))) { settings.dropout = parseFloat(m[1]); say(`Allowing ${m[1]}% dropout`); }
+          if (/\bpaired\b|\bbefore (and|vs\.?) after\b/.test(c)) { settings.design = "paired"; say("Paired design"); }
+          else if (/\banova\b|\b(three|four|five|\d+) groups\b/.test(c)) { settings.design = "anova"; say("One-way ANOVA design"); }
+          else if (/\bproportions?\b|\bpercentages?\b|\brates\b/.test(c) && !/power/.test(c)) { settings.design = "props"; say("Comparing two proportions"); }
+          else if (/\bcorrelation\b/.test(c)) { settings.design = "corr"; say("Correlation design"); }
+          else if (/\btwo (independent )?groups\b|\bt[- ]?test\b/.test(c)) { settings.design = "two"; say("Two independent groups"); }
         }
         if (done()) continue;
       }

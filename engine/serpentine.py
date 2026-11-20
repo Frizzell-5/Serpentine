@@ -22,7 +22,8 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib import font_manager, patheffects  # noqa: E402
-from matplotlib.patches import FancyBboxPatch  # noqa: E402
+from matplotlib.patches import FancyBboxPatch, Patch  # noqa: E402
+from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.colors import to_rgba, to_rgb, to_hex  # noqa: E402
 from matplotlib.ticker import FuncFormatter, MultipleLocator, FormatStrFormatter, LogLocator, NullFormatter, MaxNLocator  # noqa: E402
 import scipy  # noqa: E402
@@ -31,7 +32,7 @@ from scipy.optimize import curve_fit  # noqa: E402
 
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
-ENGINE_VERSION = "0.7.0"
+ENGINE_VERSION = "0.8.0"
 
 
 class UserError(Exception):
@@ -713,16 +714,16 @@ def _finish(ax, s, xlabel="", ylabel="", title="", legend=False, title_pad=None)
         for lab in (ax.get_xticklabels() if cat == "x" else ax.get_yticklabels()):
             lab.set_fontstyle("italic")
     if legend and s["legend"] != "none":
-        handles, labels = ax.get_legend_handles_labels()
+        handles, labels = getattr(ax, "_ll_legend", None) or ax.get_legend_handles_labels()
         if handles:
             kw = {"ncol": int(s["legend_cols"]), "title": s["legend_title"] or None, "frameon": bool(s["legend_frame"])}
             if s["legend"] == "outside":
-                ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), **kw)
+                ax.legend(handles, labels, loc="center left", bbox_to_anchor=(1.02, 0.5), **kw)
             elif s["legend"] == "outside top":
                 kw["ncol"] = max(kw["ncol"], len(handles))
-                ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), **kw)
+                ax.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 1.02), **kw)
             else:
-                ax.legend(loc=s["legend"], **kw)
+                ax.legend(handles, labels, loc=s["legend"], **kw)
             if s.get("tick_italic") and ax.get_legend():
                 for t in ax.get_legend().get_texts():
                     t.set_fontstyle("italic")
@@ -757,8 +758,10 @@ def _stripes(ax, s, cat):
         tk = [t for t in ax.get_yticks() if lo <= t <= hi]
         for a, b in zip(tk[0::2], tk[1::2]):
             ax.axhspan(a, b, **kw)
-    ax.set_xlim(xl)
-    ax.set_ylim(yl)
+    if ax.get_xscale() != "log" or min(xl) > 0:
+        ax.set_xlim(xl)
+    if ax.get_yscale() != "log" or min(yl) > 0:
+        ax.set_ylim(yl)
 
 
 def _round_bars(ax, s):
@@ -934,16 +937,19 @@ def _swarm_offsets(v, s, n_groups, value_span, horizontal):
     return offs
 
 
-def plot_groups(ax, names, values, s, paired_matrix=None):
-    """Draw one category per group. values: list of 1-D arrays. Returns the top of each group."""
-    G = _gstyles(s, names)
+def plot_groups(ax, names, values, s, paired_matrix=None, positions=None, styles=None, ticks=None):
+    """Draw one category per group. values: list of 1-D arrays. Returns the top of each group.
+
+    For grouped (clustered) figures pass `positions` (x of each group), `styles` (per-group style dicts,
+    e.g. coloured by the second factor) and `ticks` ((positions, labels) of the category axis)."""
+    G = styles or _gstyles(s, names)
     n = len(names)
     H = s["orientation"] == "horizontal"
     kind = s["plot_kind"] if s["plot_kind"] in PLOT_KINDS else "bar"
     fg, bg = s["fg"], s["bg"]
     lw, ew, ms, bw = s["line_width"], s["edge_width"], s["marker_size"], s["bar_width"]
     rng = np.random.default_rng(7)
-    cats = np.arange(n, dtype=float)
+    cats = np.arange(n, dtype=float) if positions is None else np.asarray(positions, float)
     vals = [np.asarray(v, float) for v in values]
     finite_all = np.concatenate([v[np.isfinite(v)] for v in vals]) if vals else np.array([])
     span = float(np.ptp(finite_all)) * 1.2 if len(finite_all) > 1 and np.ptp(finite_all) > 0 else 1.0
@@ -1109,6 +1115,25 @@ def plot_groups(ax, names, values, s, paired_matrix=None):
                        color=to_rgba(pface, s["point_alpha"]), edgecolor=_point_edge(s, pface),
                        linewidth=s["point_edge_width"], zorder=5)
 
+    if ticks is not None:
+        tpos, labels = ticks
+        lo_c, hi_c = float(np.min(cats)) - 0.6 * bw / 0.62, float(np.max(cats)) + 0.6 * bw / 0.62
+        if not H and not s["xrot"]:
+            per_group_pt = s["width"] * 72 * 0.7 / max(1, len(tpos))
+            chars = max(6, int(per_group_pt / (s["tick_size"] * 0.62)))
+            labels = [textwrap.fill(str(lab), chars, break_long_words=False) for lab in labels]
+        if H:
+            ax.set_yticks(tpos)
+            ax.set_yticklabels(labels)
+            ax.set_ylim(hi_c, lo_c)
+        else:
+            ax.set_xticks(tpos)
+            ax.set_xticklabels(labels)
+            ax.set_xlim(lo_c, hi_c)
+        ax._ll_cat = "y" if H else "x"
+        if kind in ("bar", "lollipop") and not s["logy"] and len(finite_all) and finite_all.min() >= 0:
+            (ax.set_xlim(left=0) if H else ax.set_ylim(bottom=0))
+        return tops
     labels = [g["label"] for g in G]
     if not H and not s["xrot"]:
         per_group_pt = s["width"] * 72 * 0.7 / max(1, n)
@@ -1133,8 +1158,9 @@ def plot_groups(ax, names, values, s, paired_matrix=None):
     return tops
 
 
-def draw_brackets(ax, comparisons, tops, s):
+def draw_brackets(ax, comparisons, tops, s, positions=None):
     """comparisons: list of (i, j, p). Stacks brackets beyond the groups on the value axis."""
+    P = list(range(len(tops))) if positions is None else list(positions)
     show = [(i, j, p) for i, j, p in comparisons if s["show_ns"] or (p is not None and p < 0.05)]
     if s["sig"] == "none" or not show or not tops:
         return 0
@@ -1157,17 +1183,17 @@ def draw_brackets(ax, comparisons, tops, s):
     for i, j, p in sorted(show, key=lambda c: (abs(c[1] - c[0]), c[0])):
         a, b = min(i, j), max(i, j)
         y = max(level[a:b + 1]) + gap
-        cs = [a, a, b, b]
+        cs = [P[a], P[a], P[b], P[b]]
         vs = [inv(y - tick), inv(y), inv(y), inv(y - tick)]
         ax.plot(*((vs, cs) if H else (cs, vs)), color=s["fg"], linewidth=max(0.7, s["axis_width"]),
                 clip_on=False, zorder=6)
         label = stars(p) if s["sig"] == "stars" else fmt_p(p)
         size = s["sig_size"] * (1.0 if s["sig"] == "stars" else 0.8)
         if H:
-            ax.text(inv(y + span * 0.01), (a + b) / 2, label, ha="left", va="center",
+            ax.text(inv(y + span * 0.01), (P[a] + P[b]) / 2, label, ha="left", va="center",
                     rotation=-90 if s["sig"] == "p" else 0, fontsize=size, color=s["fg"], zorder=6)
         else:
-            ax.text((a + b) / 2, inv(y + span * 0.005), label, ha="center", va="bottom",
+            ax.text((P[a] + P[b]) / 2, inv(y + span * 0.005), label, ha="center", va="bottom",
                     fontsize=size, color=s["fg"], zorder=6)
         for k in range(a, b + 1):
             level[k] = y + text_h
@@ -1180,21 +1206,22 @@ def draw_brackets(ax, comparisons, tops, s):
 
 
 def describe(names, values, labels=None):
-    cols = ["Group", "n", "Mean", "SD", "SEM", "95% CI low", "95% CI high", "Median", "Q1", "Q3", "Min", "Max"]
+    cols = ["Group", "n", "Mean", "SD", "SEM", "95% CI low", "95% CI high", "Median", "Q1", "Q3", "Min", "Max", "CV (%)"]
     rows = []
     for nm, v in zip(labels or names, values):
         v = np.asarray(v, float)
         v = v[np.isfinite(v)]
         n = len(v)
         if n == 0:
-            rows.append([nm, 0] + [None] * 10)
+            rows.append([nm, 0] + [None] * 11)
             continue
         m = np.mean(v)
         sd = np.std(v, ddof=1) if n > 1 else np.nan
         sem = sd / math.sqrt(n) if n > 1 else np.nan
         h = sem * stats.t.ppf(0.975, n - 1) if n > 1 else np.nan
         q1, med, q3 = np.percentile(v, [25, 50, 75])
-        rows.append([nm, n] + [_r(x) for x in (m, sd, sem, m - h, m + h, med, q1, q3, v.min(), v.max())])
+        cv = sd / abs(m) * 100 if n > 1 and m != 0 else np.nan
+        rows.append([nm, n] + [_r(x) for x in (m, sd, sem, m - h, m + h, med, q1, q3, v.min(), v.max())] + [_r(cv, 4)])
     return {"title": "Descriptive statistics", "columns": cols, "rows": rows}
 
 
@@ -1309,9 +1336,13 @@ def _compare_stats(names, values, paired, mode, posthoc, equal_var):
     if k == 2:
         a, b = vals
         if paired and parametric:
-            r = stats.ttest_rel(b, a)
             d = b - a
             sd = np.std(d, ddof=1)
+            if not sd > 1e-12 * max(1.0, float(np.max(np.abs(d)))):
+                out["notes"].append("Every subject changed by exactly the same amount (%s), so a paired t statistic "
+                                    "can't be computed. Report the difference itself." % _fmt(float(np.mean(d))))
+                return out
+            r = stats.ttest_rel(b, a)
             dz = np.mean(d) / sd if sd > 0 else np.nan
             out.update(test="Paired t-test", p=r.pvalue,
                        line="t(%d) = %.3f, %s, Cohen's dz = %.2f" % (len(d) - 1, r.statistic, fmt_p(r.pvalue), dz))
@@ -1349,7 +1380,11 @@ def _compare_stats(names, values, paired, mode, posthoc, equal_var):
             F, df1, df2, p = _rm_anova(mat)
             out.update(test="Repeated-measures one-way ANOVA", p=p,
                        line="F(%d, %d) = %.3f, %s" % (df1, df2, F, fmt_p(p)))
-            raw = [stats.ttest_rel(mat[:, j], mat[:, i]).pvalue for i, j in pairs]
+            raw = [stats.ttest_rel(mat[:, j], mat[:, i]).pvalue if np.std(mat[:, j] - mat[:, i]) > 0 else np.nan
+                   for i, j in pairs]
+            if any(not np.isfinite(x) for x in raw):
+                out["notes"].append("Some pairs of groups differ by the same amount in every subject; their paired "
+                                    "comparison can't be computed and is shown as not significant.")
             ph_name = "paired t-tests with Holm correction"
         else:
             r = stats.friedmanchisquare(*[mat[:, j] for j in range(k)])
@@ -1559,6 +1594,27 @@ def analysis_compare(datasets, S, s):
                 values = [v - ref for v in values]
                 suffix, norm_note = "difference from %s" % names[0], "Values were expressed as the difference from the mean of the %s group." % names[0]
             ylabel = "%s (%s)" % (ylabel, suffix) if ylabel else suffix[0].upper() + suffix[1:]
+    out_mode = S.get("outliers", "keep")
+    out_rows = []
+    if out_mode in ("flag", "remove"):
+        method = S.get("outlier_method", "grubbs")
+        values = [np.asarray(v, float).copy() for v in values]
+        for gi, nm in enumerate(names):
+            idx = grubbs_outliers(values[gi]) if method == "grubbs" else iqr_outliers(values[gi])
+            for k in idx:
+                out_rows.append([nm, _r(values[gi][k]), "Removed" if out_mode == "remove" else "Kept"])
+            if out_mode == "remove" and idx:
+                values[gi][idx] = np.nan
+        mname = "Grubbs' test (alpha = 0.05)" if method == "grubbs" else "Tukey's fences (1.5 x IQR)"
+        if out_rows:
+            notes.append("%d possible outlier(s) by %s: %s. %s" % (
+                len(out_rows), mname, ", ".join("%s in %s" % (_fmt(r[1]), r[0]) for r in out_rows[:6]),
+                "They were removed from the statistics and the figure." if out_mode == "remove"
+                else "They are still included; set Outliers to Remove to exclude them."))
+            if out_mode == "remove":
+                norm_note = (norm_note + " " if norm_note else "") + "Outliers identified by %s were excluded." % mname
+        else:
+            notes.append("No outliers found by %s." % mname)
     res = compare_stats(names, values, paired=paired, mode=S.get("test", "auto"),
                         posthoc=S.get("posthoc", "all"), equal_var=S.get("equal_var", False))
     fig = _group_figure(names, values, s, res, paired, ylabel)
@@ -1567,6 +1623,8 @@ def analysis_compare(datasets, S, s):
     if res["test"]:
         summary.append({"label": res["test"], "value": res["line"], "p": _r(res["p"])})
     tables = [describe(names, values, shown)] + stats_tables(shown, res)
+    if out_rows:
+        tables.append({"title": "Possible outliers", "columns": ["Group", "Value", "Action"], "rows": out_rows})
     return {
         "figures": [{"id": "groups", "title": "Group comparison", "fig": fig, "style": s}],
         "tables": tables, "summary": summary, "notes": col_notes + notes + res["notes"],
@@ -2369,13 +2427,1679 @@ def analysis_survival(datasets, S, s):
             "tables": tables, "summary": summary, "notes": col_notes + notes, "methods": meth, "groups": groups}
 
 
+# ----------------------------------------------------------------------------
+# Shared helpers for grouped (clustered) figures
+# ----------------------------------------------------------------------------
+
+def _text_cols(df, info):
+    return [c for c in df.columns if info["kinds"][c] == "text"]
+
+
+def _guess_col(cols, pattern, exclude=()):
+    rx = re.compile(pattern, re.I)
+    return next((c for c in cols if c not in exclude and rx.search(str(c))), None)
+
+
+def _levels(labels, order_text):
+    found = [g for g in dict.fromkeys(str(x) for x in labels) if g and g.lower() not in ("nan", "none", "")]
+    return _order(found, order_text)
+
+
+def _legend_proxies(s, G, kind):
+    handles = []
+    for g in G:
+        if kind in ("dot", "mean", "lollipop", "beeswarm", "strip"):
+            handles.append(Line2D([], [], ls="none", marker=g["marker"], ms=s["marker_size"] * 1.25, mfc=g["color"],
+                                  mec=_point_edge(s, g["color"]), mew=s["point_edge_width"]))
+        else:
+            if s["fill"] == "solid":
+                face = to_rgba(g["color"], 0.92)
+            elif s["fill"] == "outline":
+                face = (0, 0, 0, 0)
+            else:
+                face = to_rgba(g["color"], max(s["fill_alpha"], 0.25))
+            handles.append(Patch(facecolor=face, edgecolor=g["color"], linewidth=max(0.6, s["edge_width"]),
+                                 hatch=g["hatch"]))
+    return handles, [g["label"] for g in G]
+
+
+def _grouped_figure(a_levels, b_levels, cells, s, pairs, ylabel, xlabel="", legend_title="", a_labels=None):
+    """Clustered plot: clusters along the category axis = levels of A, coloured members = levels of B.
+
+    cells[(i, j)] holds the values for A level i and B level j. pairs: [((i, j), (i2, j2), p)]."""
+    nA, nB = len(a_levels), len(b_levels)
+    step = 0.84 / max(nB, 1)
+    s2 = dict(s, bar_width=min(1.0, s["bar_width"] / 0.62 * 0.9) * step, jitter=s["jitter"] * step * 1.6)
+    Gb = _gstyles(s, b_levels)
+    names, values, styles, pos = [], [], [], []
+    index = {}
+    for i in range(nA):
+        for j in range(nB):
+            index[(i, j)] = len(names)
+            names.append("%s · %s" % (a_levels[i], b_levels[j]))
+            values.append(np.asarray(cells.get((i, j), []), float))
+            styles.append(Gb[j])
+            pos.append(i + (j - (nB - 1) / 2.0) * step)
+    fig, ax = _new_fig(s)
+    with plt.rc_context(_rc(s)):
+        tops = plot_groups(ax, names, values, s2, positions=pos, styles=styles,
+                           ticks=(list(range(nA)), a_labels or [str(a) for a in a_levels]))
+        H = s["orientation"] == "horizontal"
+        if nB > 1:
+            ax._ll_legend = _legend_proxies(s, Gb, s["plot_kind"])
+        if not s["legend_title"] and legend_title:
+            s = dict(s, legend_title=legend_title)
+        if s["legend"] == "best":  # "best" lands on top of bars; a row above the plot is cleaner
+            s = dict(s, legend="outside top" if not s["title"] else "outside")
+        _finish(ax, s, xlabel=ylabel if H else xlabel, ylabel=xlabel if H else ylabel, legend=nB > 1)
+        flat = [(index[a], index[b], p) for a, b, p in pairs if a in index and b in index]
+        drawn = draw_brackets(ax, flat, tops, s, positions=pos)
+    return fig, drawn
+
+
+# ----------------------------------------------------------------------------
+# Two-way ANOVA
+# ----------------------------------------------------------------------------
+
+def _effect_coding(idx, k):
+    X = np.zeros((len(idx), max(k - 1, 0)))
+    for l in range(k - 1):
+        X[:, l] = (idx == l).astype(float)
+    X[idx == k - 1, :] = -1.0
+    return X
+
+
+def two_way_anova(cells, nA, nB):
+    """Type III two-way ANOVA (effect coding). cells[(i, j)] = 1-D arrays. Returns a dict."""
+    y, A, B = [], [], []
+    for (i, j), v in cells.items():
+        v = np.asarray(v, float)
+        v = v[np.isfinite(v)]
+        y.extend(v)
+        A.extend([i] * len(v))
+        B.extend([j] * len(v))
+    y, A, B = np.asarray(y, float), np.asarray(A), np.asarray(B)
+    N = len(y)
+    XA, XB = _effect_coding(A, nA), _effect_coding(B, nB)
+    XAB = np.column_stack([XA[:, p] * XB[:, q] for p in range(nA - 1) for q in range(nB - 1)])
+    one = np.ones((N, 1))
+
+    def sse(*blocks):
+        X = np.column_stack(blocks)
+        beta = np.linalg.lstsq(X, y, rcond=None)[0]
+        r = y - X @ beta
+        return float(r @ r), r
+
+    full, resid = sse(one, XA, XB, XAB)
+    df_err = N - nA * nB
+    mse = full / df_err if df_err > 0 else np.nan
+    terms = []
+    for key, blocks, df in (("A", (one, XB, XAB), nA - 1), ("B", (one, XA, XAB), nB - 1),
+                            ("AB", (one, XA, XB), (nA - 1) * (nB - 1))):
+        ss = max(sse(*blocks)[0] - full, 0.0)
+        F = (ss / df) / mse if mse and mse > 0 else np.nan
+        p = float(stats.f.sf(F, df, df_err)) if np.isfinite(F) else np.nan
+        terms.append({"key": key, "ss": ss, "df": df, "ms": ss / df, "F": F, "p": p,
+                      "eta": ss / (ss + full) if ss + full > 0 else np.nan})
+    return {"terms": terms, "sse": full, "df_err": df_err, "mse": mse, "resid": resid, "N": N}
+
+
+def _sidak(p, m):
+    return 1.0 - (1.0 - min(max(p, 0.0), 1.0)) ** m if m > 1 else p
+
+
+def analysis_twoway(datasets, S, s):
+    d = _pick_dataset(datasets, S.get("dataset"))
+    df, info = read_table(d["text"])
+    notes = []
+    num, text = _numeric_cols(df, info), _text_cols(df, info)
+    layout = S.get("layout", "long")
+    if layout == "grouped":
+        # Prism-style grouped table: first text column = rows (factor A), other columns = factor B
+        acol = _choose(S, "row_col", df, text[0] if text else None, notes, "row label")
+        if not acol:
+            raise UserError("The grouped layout needs a first column with row names (factor A).")
+        _need_col(df, acol, "row label")
+        vcols = [c for c in num if c != acol]
+        if not vcols:
+            raise UserError("No numeric columns found.")
+        a_lab = _labels(df, acol, info)
+        a_levels = _levels(a_lab, S.get("a_order"))
+        heads = [c.split(" · ", 1)[0] if " · " in c else re.sub(r"[\s_]*(\(?\d+\)?|rep\s*\d+|[A-Z])$", "", c).strip() or c
+                 for c in vcols]
+        b_levels = _order(list(dict.fromkeys(heads)), S.get("b_order"))
+        cells = {}
+        for i, a in enumerate(a_levels):
+            sel_rows = (a_lab == a).to_numpy()
+            for j, b in enumerate(b_levels):
+                vals = [pd.to_numeric(df.loc[sel_rows, c], errors="coerce").to_numpy(float)
+                        for c, h in zip(vcols, heads) if h == b]
+                cells[(i, j)] = np.concatenate(vals) if vals else np.array([])
+        a_name = S.get("a_name") or acol
+        b_name = S.get("b_name") or ""
+        ylabel = S.get("y_name") or ""
+    else:
+        acol = _choose(S, "a_col", df, text[0] if text else None, notes, "first factor")
+        bcol = _choose(S, "b_col", df, next((c for c in text if c != acol), None), notes, "second factor")
+        vcol = _choose(S, "value_col", df, num[0] if num else None, notes, "value")
+        if not acol or not bcol or not vcol:
+            raise UserError("Two-way ANOVA needs two factor columns (e.g. Genotype and Treatment) and a value column.")
+        for c, w in ((acol, "first factor"), (bcol, "second factor"), (vcol, "value")):
+            _need_col(df, c, w)
+        if len({acol, bcol, vcol}) < 3:
+            raise UserError("Pick three different columns: two factors and the values.")
+        a_lab, b_lab = _labels(df, acol, info), _labels(df, bcol, info)
+        a_levels, b_levels = _levels(a_lab, S.get("a_order")), _levels(b_lab, S.get("b_order"))
+        v_all = pd.to_numeric(df[vcol], errors="coerce").to_numpy(float)
+        cells = {(i, j): v_all[((a_lab == a) & (b_lab == b)).to_numpy()]
+                 for i, a in enumerate(a_levels) for j, b in enumerate(b_levels)}
+        a_name, b_name = S.get("a_name") or acol, S.get("b_name") or bcol
+        ylabel = S.get("y_name") or vcol
+    if len(a_levels) < 2 or len(b_levels) < 2:
+        raise UserError("Each factor needs at least 2 levels (found %d and %d). With one factor, use Compare groups."
+                        % (len(a_levels), len(b_levels)))
+    if len(a_levels) * len(b_levels) > 60:
+        raise UserError("Too many combinations (%d). Check that the factor columns hold group names, not values."
+                        % (len(a_levels) * len(b_levels)))
+    transform = S.get("transform", "none")
+    if transform in ("log10", "log2", "sqrt"):
+        bad = sum(int((v[np.isfinite(v)] <= 0).sum()) if transform != "sqrt" else int((v[np.isfinite(v)] < 0).sum())
+                  for v in cells.values())
+        f = {"log10": np.log10, "log2": np.log2, "sqrt": np.sqrt}[transform]
+
+        def tf(v):
+            v = np.array(v, float)
+            v[(v < 0) if transform == "sqrt" else (v <= 0)] = np.nan
+            return f(v)
+        cells = {k: tf(v) for k, v in cells.items()}
+        if bad:
+            notes.append("%d value(s) of 0 or below can't be %s-transformed and were left out." % (bad, transform))
+        ylabel = "%s(%s)" % (transform, ylabel) if ylabel else transform
+    nA, nB = len(a_levels), len(b_levels)
+    clean = {k: v[np.isfinite(v)] for k, v in cells.items()}
+    empty = ["%s · %s" % (a_levels[i], b_levels[j]) for (i, j), v in clean.items() if len(v) == 0]
+    if empty:
+        raise UserError("Every combination needs at least one value. Missing: %s." % ", ".join(empty[:6]))
+    res = two_way_anova(clean, nA, nB)
+    if res["df_err"] < 1:
+        raise UserError("Not enough replicates: two-way ANOVA needs more than one value in at least one combination.")
+    names = {"A": a_name, "B": b_name or "Columns", "AB": "Interaction"}
+    tA = {t["key"]: t for t in res["terms"]}
+    summary = []
+    for key in ("AB", "A", "B"):
+        t = tA[key]
+        summary.append({"label": "%s%s" % (names[key], "" if key == "AB" else " (main effect)"),
+                        "value": "F(%d, %d) = %.3f, %s, partial η² = %.2f" % (t["df"], res["df_err"], t["F"], fmt_p(t["p"]), t["eta"]),
+                        "p": _r(t["p"])})
+    if tA["AB"]["p"] < 0.05:
+        notes.append("The interaction is significant: the effect of %s depends on %s, so interpret main effects with care "
+                     "and look at the comparisons within each level." % (names["B"].lower() if b_name else "the second factor", a_name))
+    if len(res["resid"]) >= 3 and np.ptp(res["resid"]) > 0:
+        sw = stats.shapiro(res["resid"]).pvalue
+        if sw < 0.05:
+            notes.append("The residuals don't look normally distributed (Shapiro-Wilk p = %.3f). Consider a log "
+                         "transform (Settings) if the data are skewed." % sw)
+    ns = [len(v) for v in clean.values()]
+    if min(ns) < 3:
+        notes.append("Some combinations have fewer than 3 values: treat p-values with caution.")
+    if len(set(ns)) > 1:
+        notes.append("Group sizes differ (n = %d to %d); Type III sums of squares were used." % (min(ns), max(ns)))
+    # Post-hoc comparisons, using the pooled error term
+    mode = S.get("posthoc", "within_a")
+    mse, dfe = res["mse"], res["df_err"]
+    means = {k: float(np.mean(v)) for k, v in clean.items()}
+    comps = []
+    if mode == "within_a":
+        for i in range(nA):
+            comps += [((i, j), (i, j2)) for j in range(nB) for j2 in range(j + 1, nB)]
+    elif mode == "within_b":
+        for j in range(nB):
+            comps += [((i, j), (i2, j)) for i in range(nA) for i2 in range(i + 1, nA)]
+    elif mode == "all":
+        keys = [(i, j) for i in range(nA) for j in range(nB)]
+        comps = [(keys[x], keys[y]) for x in range(len(keys)) for y in range(x + 1, len(keys))]
+    rows_pc, pairs = [], []
+    for a, b in comps:
+        diff = means[b] - means[a]
+        se = math.sqrt(mse * (1 / len(clean[a]) + 1 / len(clean[b])))
+        if mode == "all":
+            q = abs(diff) / (se / math.sqrt(2)) if se > 0 else np.inf
+            p = float(stats.studentized_range.sf(q, nA * nB, dfe)) if np.isfinite(q) else 0.0
+            stat = q
+            crit = stats.studentized_range.ppf(0.95, nA * nB, dfe) * se / math.sqrt(2)
+        else:
+            tval = diff / se if se > 0 else np.inf
+            p = _sidak(float(2 * stats.t.sf(abs(tval), dfe)), len(comps)) if np.isfinite(tval) else 0.0
+            stat = tval
+            crit = stats.t.ppf(1 - (1 - (0.95 ** (1 / max(len(comps), 1)))) / 2, dfe) * se
+        lab = lambda k: "%s · %s" % (a_levels[k[0]], b_levels[k[1]])
+        rows_pc.append([lab(b) + " vs " + lab(a), _r(diff), _r(diff - crit), _r(diff + crit), _r(stat), _r(p), stars(p)])
+        pairs.append((a, b, p))
+    ph_name = {"within_a": "Šidák-corrected comparisons of %s levels within each %s level" % (b_name or "column", a_name),
+               "within_b": "Šidák-corrected comparisons of %s levels within each %s level" % (a_name, b_name or "column"),
+               "all": "Tukey's multiple comparisons test across all combinations"}.get(mode, "")
+    fig, drawn = _grouped_figure(a_levels, b_levels, cells, s, pairs, ylabel, xlabel=S.get("a_name") or a_name,
+                                 legend_title=b_name)
+    if drawn < 0:
+        notes.append("%d comparisons are significant, too many to draw as brackets; see the table." % -drawn)
+    tables = [{"title": "Two-way ANOVA (Type III)", "columns": ["Source", "SS", "df", "MS", "F", "p", "Partial eta squared", "Summary"],
+               "rows": [[names[t["key"]], _r(t["ss"]), t["df"], _r(t["ms"]), _r(t["F"]), _r(t["p"]), _r(t["eta"]), stars(t["p"])]
+                        for t in (tA["AB"], tA["A"], tA["B"])] + [["Residual", _r(res["sse"]), dfe, _r(mse), None, None, None, ""]]}]
+    cell_names = ["%s · %s" % (a_levels[i], b_levels[j]) for i in range(nA) for j in range(nB)]
+    tables.insert(0, describe(cell_names, [clean[(i, j)] for i in range(nA) for j in range(nB)]))
+    if rows_pc:
+        tables.append({"title": "Multiple comparisons (%s)" % ("Tukey" if mode == "all" else "Šidák"),
+                       "columns": ["Comparison", "Mean difference", "95% CI low", "95% CI high", "q" if mode == "all" else "t",
+                                   "Adjusted p", "Summary"], "rows": rows_pc})
+    meth = ("Data were analyzed by two-way ANOVA with factors %s and %s, including their interaction (Type III sums of "
+            "squares)%s.%s %s P < 0.05 was considered statistically significant. %s"
+            % (a_name, b_name or "column group",
+               "; values were %s-transformed before analysis" % transform if transform in ("log10", "log2", "sqrt") else "",
+               (" Post-hoc testing used %s, with the pooled ANOVA error term." % ph_name) if ph_name else "",
+               _methods_shown(s), _software_line()))
+    return {"figures": [{"id": "twoway", "title": "Two-way ANOVA", "fig": fig, "style": s}],
+            "tables": tables, "summary": summary, "notes": notes, "methods": meth, "groups": b_levels}
+
+
+def _methods_shown(s):
+    err = ERROR_NAMES.get(s["error"], "SEM")
+    kind = s["plot_kind"]
+    if kind == "box":
+        return "Box plots show the median and interquartile range."
+    if kind in ("violin", "raincloud", "boxviolin"):
+        return "Violin plots show the distribution with median and interquartile range."
+    if kind in ("beeswarm", "strip"):
+        return "Individual values are shown."
+    return "Data are shown as mean%s%s." % (" +/- %s" % err if err else "", " with individual values" if s["show_points"] else "")
+
+
+# ----------------------------------------------------------------------------
+# qPCR relative expression (2^-ΔΔCt / Pfaffl)
+# ----------------------------------------------------------------------------
+
+_REF_GENES = re.compile(r"^(gapdh|actb|b-?actin|beta-?actin|β-?actin|18s|18s rrna|rn18s|b2m|hprt1?|rplp0|36b4|tbp|ppia|"
+                        r"ubc|ywhaz|gusb|rpl\d+[a-z]?|rps\d+[a-z]?|ef1a|eef1a1|pgk1|sdha|hmbs|tubb|tuba1a|cyclophilin|"
+                        r"actin|ubiquitin|rp49|rpl32|gapdh-1)$", re.I)
+
+
+def _parse_eff(text, notes):
+    out = {}
+    for part in re.split(r"[;,\n]", str(text or "")):
+        if not part.strip():
+            continue
+        m = re.match(r"^\s*(.+?)\s*[=:]\s*([\d.]+)\s*(%?)\s*$", part)
+        if not m:
+            notes.append('Couldn\'t read the efficiency "%s". Use Gene = 1.95 or Gene = 95%%.' % part.strip())
+            continue
+        v = float(m.group(2))
+        if m.group(3) or v > 2.5:
+            v = 1 + v / 100.0
+        out[m.group(1).strip().lower()] = v
+    return out
+
+
+def _strip_rep(name):
+    t = re.sub(r"[\s_\-.]*(rep|r|#)?\s*\(?\d+\)?[a-z]?$", "", str(name), flags=re.I).strip()
+    return t or str(name)
+
+
+def analysis_qpcr(datasets, S, s):
+    d = _pick_dataset(datasets, S.get("dataset"))
+    df, info = read_table(d["text"])
+    notes = []
+    cols = list(df.columns)
+    text, num = _text_cols(df, info), _numeric_cols(df, info)
+    layout = S.get("layout", "long")
+    scol = _choose(S, "sample_col", df, _guess_col(text, r"sample|animal|subject|mouse|patient|^id$|name") or (text[0] if text else None), notes, "sample")
+    gcol_set = S.get("group_col") or ""
+    if gcol_set == "__none__":
+        gcol = None
+    else:
+        gcol = _choose(S, "group_col", df, _guess_col(text, r"group|condition|treat|genotype|cohort", exclude=(scol,)), notes, "group")
+    rows = []  # (sample, group, gene, ct)
+    undetermined = 0
+    if layout == "long":
+        tcol = _choose(S, "gene_col", df, _guess_col(text, r"target|gene|detector|assay|primer", exclude=(scol, gcol)), notes, "gene")
+        ccol = _choose(S, "ct_col", df, _guess_col(cols, r"^c[tq]$|\bc[tq]\b|cq|ct ?mean|threshold cycle", exclude=(scol, gcol, tcol))
+                       or (num[0] if num else None), notes, "Ct")
+        if not scol or not tcol or not ccol:
+            raise UserError("qPCR (long layout) needs a sample column, a gene/target column and a Ct column.")
+        for c, w in ((scol, "sample"), (tcol, "gene"), (ccol, "Ct")):
+            _need_col(df, c, w)
+        raw_ct = df[ccol].astype(str).str.strip()
+        undetermined = int(raw_ct.str.lower().isin(["undetermined", "undet", "no ct", "n/a", "nd", "no amp"]).sum())
+        ct = pd.to_numeric(df[ccol], errors="coerce").to_numpy(float)
+        sl, tl = _labels(df, scol, info), _labels(df, tcol, info)
+        gl = _labels(df, gcol, info) if gcol and gcol in df.columns else None
+        for k in range(len(df)):
+            if str(tl.iloc[k]).lower() in ("nan", ""):
+                continue
+            g = gl.iloc[k] if gl is not None else _strip_rep(sl.iloc[k])
+            rows.append((str(sl.iloc[k]), str(g), str(tl.iloc[k]), ct[k]))
+    else:
+        if not scol:
+            raise UserError("qPCR (wide layout) needs a sample column and one Ct column per gene.")
+        genes_cols = [c for c in (S.get("gene_cols") or []) if c in df.columns] or [c for c in num if c not in (scol, gcol)]
+        if not genes_cols:
+            raise UserError("No Ct columns found. Each gene should be its own numeric column.")
+        sl = _labels(df, scol, info)
+        gl = _labels(df, gcol, info) if gcol and gcol in df.columns else None
+        for c in genes_cols:
+            undetermined += int(df[c].astype(str).str.strip().str.lower().isin(["undetermined", "undet", "no ct", "nd"]).sum())
+            ct = pd.to_numeric(df[c], errors="coerce").to_numpy(float)
+            for k in range(len(df)):
+                g = gl.iloc[k] if gl is not None else _strip_rep(sl.iloc[k])
+                rows.append((str(sl.iloc[k]), str(g), str(c), ct[k]))
+    if gcol is None or gcol not in df.columns:
+        notes.append("No group column: groups were taken from sample names without their trailing numbers.")
+    if undetermined:
+        notes.append("%d well(s) were Undetermined (no amplification) and were left out." % undetermined)
+    max_ct = _f(S, "max_ct", 35.0)
+    late = [r for r in rows if np.isfinite(r[3]) and max_ct and r[3] > max_ct]
+    if late:
+        notes.append("%d well(s) have Ct above %g, near the detection limit: %s." % (
+            len(late), max_ct, ", ".join("%s %s (%.1f)" % (r[0], r[2], r[3]) for r in late[:5]) + (" …" if len(late) > 5 else "")))
+    data = pd.DataFrame(rows, columns=["sample", "group", "gene", "ct"])
+    data = data[np.isfinite(data["ct"])]
+    if data.empty:
+        raise UserError("No Ct values found.")
+    genes = list(dict.fromkeys(data["gene"]))
+    # Technical replicates
+    tech = data.groupby(["sample", "group", "gene"], sort=False)["ct"].agg(["mean", "std", "count"]).reset_index()
+    spread = tech[(tech["count"] > 1) & (tech["std"] > _f(S, "rep_sd", 0.5))]
+    if len(spread):
+        notes.append("Technical replicates disagree by more than %.2g Ct (SD) in %d sample/gene pair(s): %s." % (
+            _f(S, "rep_sd", 0.5), len(spread),
+            ", ".join("%s %s (SD %.2f)" % (r["sample"], r["gene"], r["std"]) for _, r in spread.head(5).iterrows())))
+    refs_set = [g for g in (S.get("ref_genes") or []) if g in genes]
+    refs = refs_set or [g for g in genes if _REF_GENES.match(g.strip())] or genes[:1]
+    if not refs_set:
+        notes.append("Reference gene%s: %s (chosen automatically; change it in Settings)." % ("s" if len(refs) > 1 else "", ", ".join(refs)))
+    targets = [g for g in genes if g not in refs]
+    tsel = [g for g in (S.get("targets") or []) if g in targets]
+    targets = tsel or targets
+    if not targets:
+        raise UserError("Every gene is a reference gene. Choose which genes are references in Settings.")
+    groups = _order(list(dict.fromkeys(tech["group"])), S.get("group_order"))
+    ctrl = S.get("control_group") if S.get("control_group") in groups else groups[0]
+    if ctrl != groups[0]:
+        groups = [ctrl] + [g for g in groups if g != ctrl]
+    effs = _parse_eff(S.get("efficiency"), notes)
+    E = {g: effs.get(g.lower(), 2.0) for g in genes}
+    pivot = tech.pivot_table(index=["sample", "group"], columns="gene", values="mean", aggfunc="mean").reset_index()
+    missing_ref = pivot[refs].isna().any(axis=1)
+    if missing_ref.any():
+        notes.append("%d sample(s) lack a reference Ct and were left out: %s." % (
+            int(missing_ref.sum()), ", ".join(pivot.loc[missing_ref, "sample"].astype(str).head(6))))
+        pivot = pivot[~missing_ref]
+    is_ctrl = pivot["group"] == ctrl
+    if not is_ctrl.any():
+        raise UserError('No samples in the control group "%s".' % ctrl)
+    # Pfaffl-style relative quantities against the control group's mean Ct (identical to 2^-ΔΔCt when E = 2)
+    rq_ref = np.ones(len(pivot))
+    for r in refs:
+        rq_ref = rq_ref * E[r] ** (pivot.loc[is_ctrl, r].mean() - pivot[r].to_numpy(float))
+    rq_ref = rq_ref ** (1.0 / len(refs))
+    ref_ct = pivot[refs].mean(axis=1).to_numpy(float)
+    out_kind = S.get("output", "fold")
+    unit = {"fold": "Fold change (2^-ΔΔCt)", "log2": "log2 fold change", "dct": "Relative expression (2^-ΔCt)"}[out_kind if out_kind in ("fold", "log2", "dct") else "fold"]
+    if any(abs(E[g] - 2.0) > 1e-9 for g in genes):
+        unit = unit.replace(" (2^-ΔΔCt)", " (Pfaffl)")
+    per_sample, cells, summary, stats_rows, pairs_all, gene_tables = [], {}, [], [], [], []
+    posthoc = S.get("posthoc", "control")
+    last_method = ""
+    for gi, gene in enumerate(targets):
+        ok = pivot[gene].notna().to_numpy()
+        ctg = pivot[gene].to_numpy(float)
+        rq_t = E[gene] ** (pivot.loc[is_ctrl & ok, gene].mean() - ctg)
+        ratio = rq_t / rq_ref
+        log2r = np.log2(ratio)
+        if out_kind == "dct":
+            vals_plot = E[gene] ** (-(ctg - ref_ct))
+        elif out_kind == "log2":
+            vals_plot = log2r
+        else:
+            vals_plot = ratio
+        dct = ctg - ref_ct
+        ddct = dct - np.nanmean(dct[(is_ctrl & ok).to_numpy()])
+        for k in np.where(ok)[0]:
+            per_sample.append([pivot["sample"].iloc[k], pivot["group"].iloc[k], gene, _r(ctg[k], 4), _r(ref_ct[k], 4),
+                               _r(dct[k], 4), _r(ddct[k], 4), _r(ratio[k], 5), _r(log2r[k], 4)])
+        vals_g, logs_g = [], []
+        for j, grp in enumerate(groups):
+            sel_g = ((pivot["group"] == grp).to_numpy()) & ok
+            cells[(gi, j)] = vals_plot[sel_g]
+            vals_g.append(vals_plot[sel_g])
+            logs_g.append(log2r[sel_g])
+            lv = log2r[sel_g]
+            n = len(lv)
+            gm = 2 ** np.mean(lv) if n else np.nan
+            h = stats.t.ppf(0.975, n - 1) * np.std(lv, ddof=1) / math.sqrt(n) if n > 1 else np.nan
+            fr = ratio[sel_g]
+            gene_tables.append([gene, grp, n, _r(np.mean(fr) if n else np.nan), _r(np.std(fr, ddof=1) / math.sqrt(n) if n > 1 else np.nan),
+                                _r(gm), _r(2 ** (np.mean(lv) - h) if n > 1 else np.nan), _r(2 ** (np.mean(lv) + h) if n > 1 else np.nan)])
+        if len(groups) >= 2:
+            res = compare_stats(groups, logs_g, paired=False, mode=S.get("test", "param"), posthoc=posthoc,
+                                equal_var=S.get("equal_var", False))
+            for n_ in res["notes"]:
+                notes.append("%s: %s" % (gene, n_))
+            if res["test"]:
+                summary.append({"label": "%s: %s" % (gene, res["test"]), "value": res["line"], "p": _r(res["p"])})
+                for i, j, p in res["pairs"]:
+                    stats_rows.append([gene, "%s vs %s" % (groups[j], groups[i]), _r(p), stars(p)])
+                    pairs_all.append(((gi, i), (gi, j), p))
+            last_method = res.get("method", "")
+    # Reference gene stability: its Ct shouldn't differ between groups
+    for r in refs:
+        vals_r = [pivot.loc[pivot["group"] == g, r].dropna().to_numpy(float) for g in groups]
+        if len(groups) >= 2 and all(len(v) >= 2 for v in vals_r):
+            try:
+                p_ref = stats.f_oneway(*vals_r).pvalue if len(groups) > 2 else stats.ttest_ind(*vals_r, equal_var=False).pvalue
+            except Exception:
+                p_ref = np.nan
+            if np.isfinite(p_ref) and p_ref < 0.05:
+                notes.append("Reference gene %s has different Ct values between groups (p = %.3f), so it may not be a "
+                             "stable reference here. Consider another or add a second reference gene." % (r, p_ref))
+    s = dict(s)
+    if len(targets) == 1:
+        res_fig = {"pairs": [(a[1], b[1], p) for a, b, p in pairs_all], "notes": []}
+        fig = _group_figure(groups, [cells[(0, j)] for j in range(len(groups))], s, res_fig, False,
+                            unit, title=s["title"] or targets[0])
+        if res_fig["notes"]:
+            notes += res_fig["notes"]
+    else:
+        fig, drawn = _grouped_figure(targets, groups, cells, s, pairs_all, unit, xlabel="", legend_title="")
+        if drawn < 0:
+            notes.append("Too many significant comparisons to draw as brackets; see the table.")
+    tables = [{"title": "Relative expression by group", "columns": ["Gene", "Group", "n", "Mean fold", "SEM", "Geometric mean",
+                                                                   "95% CI low", "95% CI high"], "rows": gene_tables}]
+    if stats_rows:
+        tables.append({"title": "Comparisons (on log2 fold change)", "columns": ["Gene", "Comparison", "p", "Summary"], "rows": stats_rows})
+    tables.append({"title": "Per sample", "columns": ["Sample", "Group", "Gene", "Ct (target)", "Ct (reference)", "ΔCt",
+                                                       "ΔΔCt", "Fold change", "log2 fold"], "rows": per_sample})
+    tables.append({"title": "Technical replicates", "columns": ["Sample", "Group", "Gene", "Mean Ct", "SD", "Wells"],
+                   "rows": [[r["sample"], r["group"], r["gene"], _r(r["mean"], 4), _r(r["std"], 3), int(r["count"])]
+                            for _, r in tech.iterrows()]})
+    eff_txt = "assuming 100%% amplification efficiency (2^-ΔΔCt method)" if all(abs(E[g] - 2) < 1e-9 for g in genes) else \
+        "with gene-specific amplification efficiencies (Pfaffl method; %s)" % ", ".join("%s %.0f%%" % (g, (E[g] - 1) * 100) for g in genes)
+    meth = ("Relative gene expression was calculated from quantification cycle (Ct) values %s, normalized to %s and "
+            "expressed relative to the mean of the %s group. Technical replicates were averaged. Statistical comparisons "
+            "were performed on log2-transformed fold changes. %s %s"
+            % (eff_txt, " and ".join(refs) if len(refs) < 3 else "the geometric mean of " + ", ".join(refs), ctrl,
+               last_method, _software_line()))
+    return {"figures": [{"id": "qpcr", "title": "Relative expression", "fig": fig, "style": s}],
+            "tables": tables, "summary": summary, "notes": notes, "methods": meth, "groups": groups,
+            "meta": {"qpcr": {"genes": genes, "groups": groups, "refs": refs}}}
+
+
+# ----------------------------------------------------------------------------
+# Standard curve: fit standards, interpolate unknowns (ELISA, BCA, Bradford, qPCR standards...)
+# ----------------------------------------------------------------------------
+
+STD_MODELS = {
+    "linear": "Straight line", "linear0": "Straight line through the origin", "quadratic": "Second-order polynomial",
+    "4pl": "Four-parameter logistic (4PL)", "5pl": "Five-parameter logistic (5PL)", "loglog": "Linear on log-log axes",
+}
+
+
+def _std_fit(model, x, y, w):
+    """Returns (predict(x), inverse(y), params dict, n_params)."""
+    sigma = 1 / np.sqrt(w) if w is not None else None
+    if model in ("linear", "linear0", "quadratic"):
+        if model == "linear0":
+            b = float(np.sum((w if w is not None else 1) * x * y) / np.sum((w if w is not None else 1) * x * x))
+            return (lambda xx: b * xx), (lambda yy: yy / b), {"Slope": b}, 1
+        deg = 1 if model == "linear" else 2
+        c = np.polyfit(x, y, deg, w=np.sqrt(w) if w is not None else None)
+        if deg == 1:
+            b, a = c
+            return (lambda xx: a + b * xx), (lambda yy: (yy - a) / b), {"Intercept": a, "Slope": b}, 2
+        c2, c1, c0 = c
+        lo, hi = float(np.min(x)), float(np.max(x))
+
+        def inv(yy):
+            yy = np.atleast_1d(np.asarray(yy, float))
+            out = np.full(len(yy), np.nan)
+            for k, v in enumerate(yy):
+                roots = np.roots([c2, c1, c0 - v])
+                roots = roots[np.isreal(roots)].real
+                if len(roots):
+                    mid = (lo + hi) / 2
+                    out[k] = roots[np.argmin(np.abs(roots - mid))]
+            return out
+        return (lambda xx: c0 + c1 * xx + c2 * xx ** 2), inv, {"Intercept": c0, "X": c1, "X²": c2}, 3
+    if model == "loglog":
+        ok = (x > 0) & (y > 0)
+        b, a = np.polyfit(np.log10(x[ok]), np.log10(y[ok]), 1)
+        return (lambda xx: 10 ** (a + b * np.log10(xx))), (lambda yy: 10 ** ((np.log10(yy) - a) / b)), \
+            {"log intercept": a, "log slope": b}, 2
+    # 4PL / 5PL: y = d + (a - d) / (1 + (x/c)^b)^g
+    pos = x > 0
+    xs, ys = x[pos], y[pos]
+    order = np.argsort(xs)
+    a0, d0 = float(ys[order][:2].mean()), float(ys[order][-2:].mean())
+    c0 = float(np.exp(np.mean(np.log(xs))))
+
+    def f4(xx, a, b, c, d):
+        with np.errstate(all="ignore"):
+            return d + (a - d) / (1 + (np.abs(xx) / abs(c)) ** b)
+
+    def f5(xx, a, b, c, d, g):
+        with np.errstate(all="ignore"):
+            return d + (a - d) / (1 + (np.abs(xx) / abs(c)) ** b) ** g
+    sg = sigma[pos] if sigma is not None else None
+    if model == "4pl":
+        p, _ = curve_fit(f4, xs, ys, p0=[a0, 1.0, c0, d0], sigma=sg, maxfev=40000)
+        a, b, c, d = p
+        c = abs(c)
+        inv = lambda yy: c * (np.where((yy - d) * (a - d) > 0, (a - d) / (yy - d), np.nan) - 1) ** (1 / b)
+        return (lambda xx: f4(xx, a, b, c, d)), (lambda yy: np.asarray(_nan_neg(inv(np.asarray(yy, float))))), \
+            {"Bottom (a)": a, "Hill slope (b)": b, "Inflection (c)": c, "Top (d)": d}, 4
+    p, _ = curve_fit(f5, xs, ys, p0=[a0, 1.0, c0, d0, 1.0], sigma=sg, maxfev=60000,
+                     bounds=([-np.inf, -50, 1e-12, -np.inf, 0.05], [np.inf, 50, np.inf, np.inf, 20]))
+    a, b, c, d, g = p
+    inv5 = lambda yy: c * (np.where((yy - d) * (a - d) > 0, ((a - d) / (yy - d)) ** (1 / g), np.nan) - 1) ** (1 / b)
+    return (lambda xx: f5(xx, a, b, c, d, g)), (lambda yy: np.asarray(_nan_neg(inv5(np.asarray(yy, float))))), \
+        {"Bottom (a)": a, "Hill slope (b)": b, "Inflection (c)": c, "Top (d)": d, "Asymmetry (g)": g}, 5
+
+
+def _nan_neg(v):
+    with np.errstate(all="ignore"):
+        v = np.asarray(v, float)
+        return np.where(np.isfinite(v) & (v >= 0), v, np.nan)
+
+
+def analysis_stdcurve(datasets, S, s):
+    d = _pick_dataset(datasets, S.get("dataset"))
+    df, info = read_table(d["text"])
+    notes = []
+    num, text = _numeric_cols(df, info), _text_cols(df, info)
+    xcol = _choose(S, "conc_col", df, _guess_col(num, r"conc|standard|std|amount|µg|ug|ng|pg|mg|copies|known") or (num[0] if num else None), notes, "concentration")
+    if not xcol:
+        raise UserError("Choose the column with the standards' known concentrations.")
+    _need_col(df, xcol, "concentration")
+    ycols = [c for c in (S.get("signal_cols") or []) if c in df.columns and c != xcol] or [c for c in num if c != xcol]
+    if not ycols:
+        raise UserError("Choose the signal column(s): absorbance, fluorescence, Ct...")
+    ncol = S.get("name_col") or ""
+    ncol = ncol if ncol in df.columns else (_guess_col(text, r"sample|name|well|id|label") or (text[0] if text else ""))
+    dcol = S.get("dilution_col") or ""
+    x = pd.to_numeric(df[xcol], errors="coerce").to_numpy(float)
+    Y = np.column_stack([pd.to_numeric(df[c], errors="coerce").to_numpy(float) for c in ycols])
+    with np.errstate(all="ignore"):
+        ymean = np.nanmean(np.where(np.isfinite(Y), Y, np.nan), axis=1)
+    has_y = np.isfinite(Y).any(axis=1)
+    std_rows = np.isfinite(x) & has_y
+    unk_rows = ~np.isfinite(x) & has_y
+    if std_rows.sum() < 3:
+        raise UserError("Need at least 3 standards: rows with a known concentration and a signal. Leave the "
+                        "concentration empty for unknown samples.")
+    blank_mode = S.get("blank", "none")
+    blank_vals = Y[std_rows & (x == 0)].reshape(-1)
+    blank_vals = blank_vals[np.isfinite(blank_vals)]
+    blank = float(np.mean(blank_vals)) if len(blank_vals) else 0.0
+    if blank_mode == "subtract":
+        if not len(blank_vals):
+            notes.append("No blank (a standard with concentration 0) was found, so nothing was subtracted.")
+        else:
+            Y = Y - blank
+            ymean = ymean - blank
+    model = S.get("model", "4pl")
+    if model not in STD_MODELS:
+        model = "4pl"
+    log_model = model in ("4pl", "5pl", "loglog")
+    sx_all = np.repeat(x[std_rows], Y.shape[1])
+    sy_all = Y[std_rows].reshape(-1)
+    ok = np.isfinite(sy_all)
+    if blank_mode == "subtract" and len(blank_vals):
+        ok &= sx_all != 0
+    if log_model:
+        ok &= sx_all > 0
+        if (x[std_rows] <= 0).any() and not (blank_mode == "subtract" and len(blank_vals) and (x[std_rows] >= 0).all()):
+            notes.append("Standards at concentration 0 can't sit on a log axis and were left out of the %s fit." % model.upper())
+    if model == "loglog":
+        ok &= sy_all > 0
+    sx, sy = sx_all[ok], sy_all[ok]
+    if len(np.unique(sx)) < (5 if model == "5pl" else 4 if model == "4pl" else 3 if model == "quadratic" else 2):
+        raise UserError("Not enough distinct standard concentrations for the %s model." % STD_MODELS[model].lower())
+    wmode = S.get("weight", "none")
+    w = None
+    if wmode in ("1/y", "1/y2"):
+        yy = np.abs(sy).clip(1e-12)
+        w = 1 / yy if wmode == "1/y" else 1 / yy ** 2
+    try:
+        pred, inv, params, k = _std_fit(model, sx, sy, w)
+    except Exception as e:
+        raise UserError("The %s fit did not converge (%s). Try another model." % (STD_MODELS[model], e))
+    fit = pred(sx)
+    ss_res = float(np.sum((sy - fit) ** 2))
+    ss_tot = float(np.sum((sy - sy.mean()) ** 2))
+    r2 = 1 - ss_res / ss_tot if ss_tot > 0 else np.nan
+    lo_std, hi_std = float(np.min(sx)), float(np.max(sx))
+    unit = S.get("unit") or ""
+    global_dil = _f(S, "dilution", 1.0) or 1.0
+    dil = pd.to_numeric(df[dcol], errors="coerce").to_numpy(float) if dcol in df.columns else np.full(len(df), np.nan)
+    dil = np.where(np.isfinite(dil) & (dil > 0), dil, global_dil)
+    # Back-calculated standards (accuracy)
+    back_rows = []
+    for xv in np.unique(x[std_rows]):
+        if log_model and xv <= 0:
+            continue
+        sig = np.nanmean(Y[std_rows & (x == xv)])
+        bc = float(np.asarray(inv(np.array([sig])), float).ravel()[0]) if np.isfinite(sig) else np.nan
+        back_rows.append([_r(xv), _r(sig), _r(bc), _r(bc / xv * 100 if xv and np.isfinite(bc) else np.nan, 4)])
+    bad_rec = [r for r in back_rows if r[3] is not None and abs(r[3] - 100) > 20]
+    if bad_rec:
+        notes.append("%d standard(s) back-calculate more than 20%% away from their nominal value (%s). Consider another "
+                     "model, weighting or dropping that standard." % (len(bad_rec), ", ".join(_fmt(r[0]) for r in bad_rec[:5])))
+    # LOD / LOQ from blank replicates
+    lod_txt = ""
+    if len(blank_vals) >= 2:
+        sd_b = float(np.std(blank_vals, ddof=1))
+        base = 0.0 if blank_mode == "subtract" else blank
+        rising = pred(np.array([hi_std]))[0] > pred(np.array([lo_std]))[0]
+        sgn = 1 if rising else -1
+        lod = float(np.asarray(inv(np.array([base + sgn * 3 * sd_b])), float).ravel()[0])
+        loq = float(np.asarray(inv(np.array([base + sgn * 10 * sd_b])), float).ravel()[0])
+        lod_txt = (lod, loq)
+    # Unknowns
+    unk_table, ux, uy, flags = [], [], [], 0
+    idx = np.where(unk_rows)[0]
+    names = _labels(df, ncol, info) if ncol else pd.Series(["Sample %d" % (k + 1) for k in range(len(df))])
+    for n_i, k in enumerate(idx):
+        sig = ymean[k]
+        reps = Y[k][np.isfinite(Y[k])]
+        cv = float(np.std(reps, ddof=1) / np.mean(reps) * 100) if len(reps) > 1 and np.mean(reps) != 0 else np.nan
+        xc = float(np.asarray(inv(np.array([sig])), float).ravel()[0]) if np.isfinite(sig) else np.nan
+        flag = ""
+        if not np.isfinite(xc):
+            flag = "Outside the curve"
+        elif xc > hi_std * 1.0001:
+            flag = "Above the top standard"
+        elif xc < lo_std * 0.9999:
+            flag = "Below the lowest standard"
+        if lod_txt and np.isfinite(xc) and xc < lod_txt[0]:
+            flag = (flag + "; " if flag else "") + "below LOD"
+        if flag:
+            flags += 1
+        nm = str(names.iloc[k]) if ncol else "Sample %d" % (n_i + 1)
+        unk_table.append([nm, _r(sig), _r(cv, 3), _r(xc), _r(dil[k]), _r(xc * dil[k] if np.isfinite(xc) else np.nan), flag])
+        if np.isfinite(xc):
+            ux.append(xc)
+            uy.append(sig)
+    if flags:
+        notes.append("%d unknown(s) fall outside the standard range or the curve; their values are extrapolated or "
+                     "missing. Dilute and re-run them if you can." % flags)
+    high_cv = [r for r in unk_table if r[2] is not None and r[2] > 15]
+    if high_cv:
+        notes.append("%d unknown(s) have replicate CV above 15%%: %s." % (len(high_cv), ", ".join(r[0] for r in high_cv[:5])))
+    # Figure
+    G = _gstyles(s, ["Standards", "Unknowns"])
+    fig, ax = _new_fig(s)
+    lw, ms = s["line_width"], s["marker_size"]
+    with plt.rc_context(_rc(s)):
+        c_std, c_unk = G[0]["color"], G[1]["color"]
+        ux_std = np.unique(sx)
+        means = np.array([np.mean(sy[sx == u]) for u in ux_std])
+        errs = np.array([_err(sy[sx == u], s["error"]) for u in ux_std])
+        if Y.shape[1] > 1:
+            ax.errorbar(ux_std, means, yerr=errs if s["error"] != "none" else None, fmt=G[0]["marker"], color=c_std,
+                        ms=ms * 1.1, mec=_point_edge(s, c_std), mew=s["point_edge_width"], elinewidth=s["error_width"] * 0.8,
+                        capsize=s["cap_size"] * 0.7, ls="none", zorder=4, label=G[0]["label"])
+        else:
+            ax.scatter(sx, sy, s=ms ** 2 * 1.3, marker=G[0]["marker"], color=to_rgba(c_std, s["point_alpha"]),
+                       edgecolor=_point_edge(s, c_std), linewidth=s["point_edge_width"], zorder=4, label=G[0]["label"])
+        span_lo = min([lo_std] + [v for v in ux if v > 0]) if log_model else min([lo_std] + ux)
+        span_hi = max([hi_std] + ux)
+        xx = np.geomspace(span_lo / 1.3, span_hi * 1.3, 400) if log_model else np.linspace(min(0, span_lo), span_hi * 1.05, 400)
+        ax.plot(xx, pred(xx), color=c_std, lw=lw * 1.2, ls=G[0]["ls"], zorder=3, label="%s fit" % STD_MODELS[model].split(" (")[0])
+        if log_model:
+            ax.set_xscale("log")
+        if model == "loglog":
+            ax.set_yscale("log")
+        if ux and S.get("show_unknowns", True):
+            ax.scatter(ux, uy, s=ms ** 2 * 1.5, marker=G[1]["marker"] if G[1]["marker"] != "o" else "D",
+                       facecolor=s["bg"], edgecolor=c_unk, linewidth=max(1.0, lw * 0.8), zorder=5, label=G[1]["label"])
+            if S.get("guides", True) and len(ux) <= 40:
+                y0 = ax.get_ylim()[0]
+                x0 = ax.get_xlim()[0]
+                for a_, b_ in zip(ux, uy):
+                    ax.plot([x0, a_, a_], [b_, b_, y0], color=to_rgba(c_unk, 0.35), lw=max(0.5, lw * 0.5),
+                            ls=(0, (2, 2)), zorder=2)
+                ax.set_xlim(left=x0)
+                ax.set_ylim(bottom=y0)
+        if S.get("annotate", True):
+            ax.text(0.97, 0.04, "R² = %.4f" % r2, transform=ax.transAxes, ha="right", va="bottom", fontsize=s["font_size"] * 0.85)
+        _finish(ax, s, xlabel="%s%s" % (S.get("x_name") or xcol, " (%s)" % unit if unit and unit not in (S.get("x_name") or xcol) else ""),
+                ylabel=S.get("y_name") or (ycols[0] if len(ycols) == 1 else "Signal"), legend=True)
+    summary = [{"label": "Standard curve", "value": "%s, R² = %.4f, %d standards" % (STD_MODELS[model], r2, len(np.unique(sx))), "p": None}]
+    if lod_txt:
+        u = " " + unit if unit else ""
+        summary.append({"label": "Limits from blanks", "value": "LOD %s%s, LOQ %s%s (blank + 3 SD / 10 SD)" % (
+            _fmt(lod_txt[0]), u, _fmt(lod_txt[1]), u), "p": None})
+    if unk_table:
+        ok_unk = [r for r in unk_table if r[5] is not None]
+        summary.append({"label": "Unknowns", "value": "%d interpolated%s" % (len(ok_unk), ", %d flagged" % flags if flags else ""), "p": None})
+    tables = [{"title": "Unknown samples", "columns": ["Sample", "Mean signal", "Replicate CV (%)", "Interpolated", "Dilution",
+                                                        "Concentration%s" % (" (%s)" % unit if unit else ""), "Flag"], "rows": unk_table},
+              {"title": "Curve parameters", "columns": ["Parameter", "Value"],
+               "rows": [[k_, _r(v_)] for k_, v_ in params.items()] + [["R squared", _r(r2)], ["Standards used", len(sx)]]},
+              {"title": "Back-calculated standards", "columns": ["Nominal", "Mean signal", "Back-calculated", "Recovery (%)"], "rows": back_rows}]
+    if not unk_table:
+        notes.append("No unknowns found. Add rows with a signal and an empty concentration to interpolate them.")
+    meth = ("Concentrations were interpolated from a standard curve fitted with a %s model%s%s (R² = %.4f). %s%s %s"
+            % (STD_MODELS[model].lower(), {"1/y": ", weighted 1/Y", "1/y2": ", weighted 1/Y²"}.get(wmode, ""),
+               ", after subtracting the mean blank" if blank_mode == "subtract" and len(blank_vals) else "", r2,
+               "Samples were multiplied by their dilution factor. " if (dcol in df.columns or global_dil != 1) else "",
+               "The limit of detection was defined as the mean blank plus 3 SD. " if lod_txt else "", _software_line()))
+    return {"figures": [{"id": "stdcurve", "title": "Standard curve", "fig": fig, "style": s}],
+            "tables": tables, "summary": summary, "notes": notes, "methods": meth, "groups": ["Standards", "Unknowns"]}
+
+
+# ----------------------------------------------------------------------------
+# Nonlinear curve fitting with a model library and custom equations
+# ----------------------------------------------------------------------------
+
+def _g_lin(x, y):
+    b, a = np.polyfit(x, y, 1) if np.ptp(x) > 0 else (0.0, float(np.mean(y)))
+    return a, b
+
+
+FIT_MODELS = {
+    "linear": ("Straight line", "Y = Intercept + Slope·X", ["Intercept", "Slope"],
+               lambda x, a, b: a + b * x, lambda x, y: list(_g_lin(x, y))),
+    "poly2": ("Quadratic", "Y = B0 + B1·X + B2·X²", ["B0", "B1", "B2"],
+              lambda x, a, b, c: a + b * x + c * x ** 2, lambda x, y: list(np.polyfit(x, y, 2)[::-1])),
+    "poly3": ("Cubic", "Y = B0 + B1·X + B2·X² + B3·X³", ["B0", "B1", "B2", "B3"],
+              lambda x, a, b, c, d: a + b * x + c * x ** 2 + d * x ** 3, lambda x, y: list(np.polyfit(x, y, 3)[::-1])),
+    "exp_growth": ("Exponential growth", "Y = Y0·exp(K·X)", ["Y0", "K"],
+                   lambda x, y0, k: y0 * np.exp(k * x),
+                   lambda x, y: [float(y[np.argmin(x)]) or 1.0, math.log(max(abs(y.max()), 1e-9) / max(abs(y.min()), 1e-9)) / (np.ptp(x) or 1)]),
+    "exp_decay": ("One-phase decay", "Y = (Y0 − Plateau)·exp(−K·X) + Plateau", ["Y0", "Plateau", "K"],
+                  lambda x, y0, pl, k: (y0 - pl) * np.exp(-k * x) + pl,
+                  lambda x, y: [float(y[np.argmin(x)]), float(y[np.argmax(x)]), 3.0 / (np.ptp(x) or 1)]),
+    "exp_assoc": ("One-phase association", "Y = Y0 + (Plateau − Y0)·(1 − exp(−K·X))", ["Y0", "Plateau", "K"],
+                  lambda x, y0, pl, k: y0 + (pl - y0) * (1 - np.exp(-k * x)),
+                  lambda x, y: [float(y[np.argmin(x)]), float(y[np.argmax(x)]), 3.0 / (np.ptp(x) or 1)]),
+    "exp2_decay": ("Two-phase decay", "Y = Plateau + SpanFast·exp(−Kfast·X) + SpanSlow·exp(−Kslow·X)",
+                   ["Plateau", "SpanFast", "Kfast", "SpanSlow", "Kslow"],
+                   lambda x, pl, sf, kf, ss, ks: pl + sf * np.exp(-kf * x) + ss * np.exp(-ks * x),
+                   lambda x, y: [float(y[np.argmax(x)]), float(np.ptp(y)) * 0.6, 10.0 / (np.ptp(x) or 1),
+                                 float(np.ptp(y)) * 0.4, 1.0 / (np.ptp(x) or 1)]),
+    "mm": ("Michaelis-Menten", "Y = Vmax·X / (Km + X)", ["Vmax", "Km"],
+           lambda x, vm, km: vm * x / (km + x), lambda x, y: [float(y.max()) * 1.1, float(np.median(x)) or 1.0]),
+    "hill": ("Specific binding with Hill slope", "Y = Bmax·Xʰ / (Kdʰ + Xʰ)", ["Bmax", "Kd", "h"],
+             lambda x, bm, kd, h: bm * np.abs(x) ** h / (np.abs(kd) ** h + np.abs(x) ** h),
+             lambda x, y: [float(y.max()) * 1.1, float(np.median(x[x > 0])) if (x > 0).any() else 1.0, 1.0]),
+    "one_site": ("One site, total binding", "Y = Bmax·X / (Kd + X) + NS·X", ["Bmax", "Kd", "NS"],
+                 lambda x, bm, kd, ns: bm * x / (kd + x) + ns * x,
+                 lambda x, y: [float(y.max()), float(np.median(x)) or 1.0, 0.0]),
+    "logistic": ("Logistic growth", "Y = K / (1 + ((K − Y0)/Y0)·exp(−r·X))", ["Y0", "K", "r"],
+                 lambda x, y0, K, r: K / (1 + ((K - y0) / y0) * np.exp(-r * x)),
+                 lambda x, y: [max(float(y[np.argmin(x)]), 1e-6 * max(abs(float(y.max())), 1)), float(y.max()) * 1.05, 4.0 / (np.ptp(x) or 1)]),
+    "gompertz": ("Gompertz growth (lag time)", "Y = Y0 + A·exp(−exp(μ·e/A·(λ − X) + 1))", ["Y0", "A", "mu", "lag"],
+                 lambda x, y0, A, mu, lag: y0 + A * np.exp(-np.exp(mu * math.e / A * (lag - x) + 1)),
+                 lambda x, y: [float(y.min()), float(np.ptp(y)) or 1.0, float(np.ptp(y)) / (np.ptp(x) or 1) * 2,
+                               float(np.min(x) + np.ptp(x) * 0.2)]),
+    "boltzmann": ("Boltzmann sigmoid", "Y = Bottom + (Top − Bottom) / (1 + exp((V50 − X)/Slope))", ["Bottom", "Top", "V50", "Slope"],
+                  lambda x, b, t, v, sl: b + (t - b) / (1 + np.exp((v - x) / sl)),
+                  lambda x, y: [float(y[np.argmin(x)]), float(y[np.argmax(x)]), float(np.median(x)), (np.ptp(x) or 1) / 10]),
+    "gaussian": ("Gaussian peak", "Y = Baseline + Amplitude·exp(−½((X − Mean)/SD)²)", ["Baseline", "Amplitude", "Mean", "SD"],
+                 lambda x, b, a, m, sd: b + a * np.exp(-0.5 * ((x - m) / sd) ** 2),
+                 lambda x, y: [float(y.min()), float(np.ptp(y)), float(x[np.argmax(y)]), (np.ptp(x) or 1) / 6]),
+    "power": ("Power law", "Y = A·X^B", ["A", "B"], lambda x, a, b: a * np.abs(x) ** b, lambda x, y: [float(np.mean(y)) or 1.0, 1.0]),
+}
+
+_EQ_FUNCS = {"exp": np.exp, "log": np.log, "ln": np.log, "log10": np.log10, "log2": np.log2, "sqrt": np.sqrt,
+             "abs": np.abs, "sin": np.sin, "cos": np.cos, "tan": np.tan, "tanh": np.tanh, "arctan": np.arctan,
+             "pi": np.pi, "e": np.e, "power": np.power, "minimum": np.minimum, "maximum": np.maximum, "where": np.where}
+
+
+def _custom_model(equation, init_text):
+    eq = str(equation or "").strip()
+    if not eq:
+        raise UserError("Type an equation, for example: Y = A*exp(-k*X) + C")
+    eq = re.sub(r"^\s*[yY]\s*=", "", eq).replace("^", "**").replace("·", "*").replace("−", "-").strip()
+    try:
+        code = compile(eq, "<equation>", "eval")
+    except SyntaxError as e:
+        raise UserError("Couldn't read the equation: %s." % e.msg)
+    names = [n for n in dict.fromkeys(code.co_names) if n not in _EQ_FUNCS and n not in ("X", "x")]
+    if not names:
+        raise UserError("The equation has no parameters to fit. Use letters for unknowns, e.g. A*exp(-k*X).")
+    if "X" not in code.co_names and "x" not in code.co_names:
+        raise UserError("The equation needs X in it.")
+    init = {}
+    for part in re.split(r"[;,\n]", str(init_text or "")):
+        m = re.match(r"^\s*(\w+)\s*=\s*([-+\d.eE]+)\s*$", part)
+        if m:
+            init[m.group(1)] = float(m.group(2))
+
+    def f(x, *p):
+        env = dict(_EQ_FUNCS)
+        env.update(zip(names, p))
+        env["X"] = env["x"] = x
+        with np.errstate(all="ignore"):
+            return np.asarray(eval(code, {"__builtins__": {}}, env), float) * np.ones_like(x)
+    return ("Custom equation", "Y = " + eq.replace("**", "^"), names, f, lambda x, y: [init.get(n, 1.0) for n in names])
+
+
+def _fit_one(f, x, y, p0, w=None):
+    popt, pcov = curve_fit(f, x, y, p0=p0, sigma=(1 / np.sqrt(w)) if w is not None else None, maxfev=40000)
+    pred = f(x, *popt)
+    if not np.all(np.isfinite(pred)):
+        raise RuntimeError("the fitted curve isn't finite at every point")
+    return popt, pcov, float(np.sum((y - pred) ** 2) if w is None else np.sum(w * (y - pred) ** 2))
+
+
+def analysis_curvefit(datasets, S, s):
+    d = _pick_dataset(datasets, S.get("dataset"))
+    df, info = read_table(d["text"])
+    notes = []
+    num = _numeric_cols(df, info)
+    xcol = _choose(S, "x_col", df, num[0] if num else None, notes, "X")
+    if not xcol:
+        raise UserError("Choose the X column.")
+    _need_col(df, xcol, "X")
+    model = S.get("model", "mm")
+    if model == "custom":
+        name, formula, pnames, f, guess = _custom_model(S.get("equation"), S.get("initial"))
+    else:
+        name, formula, pnames, f, guess = FIT_MODELS.get(model, FIT_MODELS["mm"])
+    x_all = pd.to_numeric(df[xcol], errors="coerce").to_numpy(float)
+    gcol = S.get("group_col") or ""
+    if S.get("layout") == "long" and gcol in df.columns:
+        ycol = _choose(S, "y_col", df, next((c for c in num if c != xcol), None), notes, "Y")
+        _need_col(df, ycol, "Y")
+        lab = _labels(df, gcol, info)
+        groups = _levels(lab, S.get("group_order"))
+        yv = pd.to_numeric(df[ycol], errors="coerce").to_numpy(float)
+        curves = [(g, x_all[(lab == g).to_numpy()], yv[(lab == g).to_numpy()][:, None]) for g in groups]
+        ylabel = ycol
+    else:
+        ycols = [c for c in (S.get("y_cols") or []) if c in df.columns and c != xcol] or [c for c in num if c != xcol]
+        if not ycols:
+            raise UserError("Choose at least one Y column.")
+        Ymat = np.column_stack([pd.to_numeric(df[c], errors="coerce").to_numpy(float) for c in ycols])
+        if S.get("mode") == "replicates":
+            curves = [(S.get("curve_name") or "Data", x_all, Ymat)]
+        else:
+            curves = [(c, x_all, Ymat[:, [k]]) for k, c in enumerate(ycols)]
+        ylabel = ycols[0] if len(ycols) == 1 or S.get("mode") == "replicates" else "Y"
+    G = _gstyles(s, [c[0] for c in curves])
+    wmode = S.get("weight", "none")
+    fig, ax = _new_fig(s)
+    lw, ms = s["line_width"], s["marker_size"]
+    rows, summary, fits, resid_sets = [], [], [], []
+    xmin_all, xmax_all = np.inf, -np.inf
+    with plt.rc_context(_rc(s)):
+        for g, (cname, xv, Ym) in zip(G, curves):
+            c = g["color"]
+            px = np.repeat(xv, Ym.shape[1])
+            py = Ym.reshape(-1)
+            ok = np.isfinite(px) & np.isfinite(py)
+            px, py = px[ok], py[ok]
+            if not len(px):
+                notes.append("%s has no usable values." % g["label"])
+                continue
+            xmin_all, xmax_all = min(xmin_all, px.min()), max(xmax_all, px.max())
+            pe = _point_edge(s, c)
+            if Ym.shape[1] > 1 and not S.get("all_points", False):
+                ux = np.unique(px)
+                ax.errorbar(ux, [np.mean(py[px == u]) for u in ux],
+                            yerr=[_err(py[px == u], s["error"]) for u in ux] if s["error"] != "none" else None,
+                            fmt=g["marker"], color=c, ms=ms * 1.1, mec=pe, mew=s["point_edge_width"],
+                            elinewidth=s["error_width"] * 0.8, capsize=s["cap_size"] * 0.7, ls="none", zorder=4, label=g["label"])
+            else:
+                ax.scatter(px, py, s=ms ** 2 * 1.2, marker=g["marker"], color=to_rgba(c, s["point_alpha"]),
+                           edgecolor=pe, linewidth=s["point_edge_width"], zorder=4, label=g["label"])
+            k = len(pnames)
+            if len(px) <= k:
+                notes.append("%s: %d points can't fit %d parameters." % (g["label"], len(px), k))
+                continue
+            w = None
+            if wmode in ("1/y", "1/y2"):
+                yy = np.abs(py).clip(1e-12)
+                w = 1 / yy if wmode == "1/y" else 1 / yy ** 2
+            try:
+                p0 = [float(v) if np.isfinite(v) else 1.0 for v in guess(px, py)]
+                popt, pcov, sse = _fit_one(f, px, py, p0, w)
+            except Exception as e:
+                notes.append("%s: the fit did not converge (%s). Try another model%s." % (
+                    g["label"], str(e).split("\n")[0][:90], " or set starting values" if model == "custom" else ""))
+                continue
+            n = len(px)
+            dof = n - k
+            se = np.sqrt(np.clip(np.diag(pcov), 0, None)) if np.all(np.isfinite(pcov)) else np.full(k, np.nan)
+            tval = stats.t.ppf(0.975, dof) if dof > 0 else np.nan
+            pred = f(px, *popt)
+            ss_res = float(np.sum((py - pred) ** 2))
+            ss_tot = float(np.sum((py - py.mean()) ** 2))
+            r2 = 1 - ss_res / ss_tot if ss_tot > 0 else np.nan
+            adj = 1 - (1 - r2) * (n - 1) / (dof - 1) if dof > 1 and np.isfinite(r2) else np.nan
+            syx = math.sqrt(ss_res / dof) if dof > 0 else np.nan
+            aicc = n * math.log(ss_res / n) + 2 * (k + 1) + (2 * (k + 1) * (k + 2)) / (n - k - 2) if ss_res > 0 and n - k - 2 > 0 else np.nan
+            for pn, v, e in zip(pnames, popt, se):
+                rows.append([g["label"], pn, _r(v), _r(e), _r(v - tval * e), _r(v + tval * e)])
+            derived = []
+            P = dict(zip(pnames, popt))
+            if model in ("exp_decay", "exp_assoc") and P.get("K", 0) > 0:
+                derived.append(("Half-life" if model == "exp_decay" else "Half-time", math.log(2) / P["K"]))
+            if model == "exp_growth" and P.get("K", 0) > 0:
+                derived.append(("Doubling time", math.log(2) / P["K"]))
+            if model == "logistic" and P.get("r", 0) > 0:
+                derived.append(("Doubling time (early)", math.log(2) / P["r"]))
+            if model == "exp2_decay":
+                for kk, lbl in (("Kfast", "Half-life fast"), ("Kslow", "Half-life slow")):
+                    if P.get(kk, 0) > 0:
+                        derived.append((lbl, math.log(2) / P[kk]))
+            if model == "gaussian":
+                derived.append(("FWHM", 2.3548 * abs(P["SD"])))
+            if model == "gompertz" and P.get("A"):
+                derived.append(("Max growth rate", P["mu"]))
+            for dn, dv in derived:
+                rows.append([g["label"], dn, _r(dv), None, None, None])
+            rows.append([g["label"], "R squared", _r(r2), None, None, None])
+            rows.append([g["label"], "Adjusted R squared", _r(adj), None, None, None])
+            rows.append([g["label"], "Sy.x (RMSE)", _r(syx), None, None, None])
+            rows.append([g["label"], "AICc", _r(aicc), None, None, None])
+            rows.append([g["label"], "Points", n, None, None, None])
+            key = ", ".join("%s = %s" % (pn, _fmt(v)) for pn, v in list(P.items())[:4])
+            if derived:
+                key += ", %s = %s" % (derived[0][0].lower(), _fmt(derived[0][1]))
+            summary.append({"label": "%s%s" % (name, " · %s" % g["label"] if len(curves) > 1 else ""),
+                            "value": "%s, R² = %.4f" % (key, r2), "p": None})
+            fits.append((g, popt, px, py, w))
+            resid_sets.append((g, px, py - pred))
+            wide = np.ptp(px) or 1.0
+            ext = _f(S, "extend", 0.0) or 0.0
+            lo_x, hi_x = px.min() - ext * wide, px.max() + ext * wide
+            xx = np.geomspace(max(lo_x, px[px > 0].min() * 0.8), hi_x, 400) if s["logx"] and (px > 0).any() else np.linspace(lo_x, hi_x, 400)
+            yy = f(xx, *popt)
+            ax.plot(xx, yy, color=c, lw=lw * 1.2, ls=g["ls"], zorder=3)
+            if S.get("band", False) and np.all(np.isfinite(pcov)):
+                # 95% confidence band by the delta method
+                eps = 1e-6
+                J = np.empty((len(xx), k))
+                for j in range(k):
+                    dp = np.array(popt, float)
+                    h = eps * max(1.0, abs(dp[j]))
+                    dp[j] += h
+                    J[:, j] = (f(xx, *dp) - yy) / h
+                var = np.einsum("ij,jk,ik->i", J, pcov, J)
+                band = tval * np.sqrt(np.clip(var, 0, None))
+                ax.fill_between(xx, yy - band, yy + band, color=to_rgba(c, s["band_alpha"]), lw=0, zorder=1)
+        if S.get("annotate", True) and len(fits) == 1 and summary:
+            ax.text(0.03, 0.97, "R² = %.4f" % float(summary[0]["value"].rsplit("R² = ", 1)[1]), transform=ax.transAxes,
+                    ha="left", va="top", fontsize=s["font_size"] * 0.85)
+        _finish(ax, s, xlabel=S.get("x_name") or xcol, ylabel=S.get("y_name") or ylabel, legend=len(curves) > 1)
+    figures = [{"id": "fit", "title": name, "fig": fig, "style": s}]
+    if S.get("residuals", False) and resid_sets:
+        fig2, ax2 = _new_fig(s, s["width"])
+        fig2.set_size_inches(s["width"], max(1.6, s["height"] * 0.55))
+        with plt.rc_context(_rc(s)):
+            for g, rx, rr in resid_sets:
+                ax2.scatter(rx, rr, s=ms ** 2, marker=g["marker"], color=to_rgba(g["color"], s["point_alpha"]),
+                            edgecolor=_point_edge(s, g["color"]), linewidth=s["point_edge_width"], zorder=3)
+            ax2.axhline(0, color=s["fg"], lw=max(0.6, lw * 0.6), ls=(0, (3, 3)), zorder=2)
+            s_res = dict(s, title="", ylabel="", xlabel="", ymin="", ymax="", logy=False, ref_lines="", panel_label="")
+            _finish(ax2, s_res, xlabel=S.get("x_name") or xcol, ylabel="Residual")
+        figures.append({"id": "residuals", "title": "Residuals", "fig": fig2, "style": s_res})
+        runs_note = []
+        for g, rx, rr in resid_sets:
+            if len(rr) >= 8:
+                sgn = np.sign(rr[np.argsort(rx)])
+                sgn = sgn[sgn != 0]
+                runs = 1 + int(np.sum(sgn[1:] != sgn[:-1]))
+                n1, n2 = int((sgn > 0).sum()), int((sgn < 0).sum())
+                if n1 and n2:
+                    mu = 2 * n1 * n2 / (n1 + n2) + 1
+                    var = 2 * n1 * n2 * (2 * n1 * n2 - n1 - n2) / ((n1 + n2) ** 2 * (n1 + n2 - 1))
+                    z = (runs - mu) / math.sqrt(var) if var > 0 else 0
+                    if stats.norm.cdf(z) < 0.05:
+                        runs_note.append(g["label"])
+        if runs_note:
+            notes.append("Residuals cluster above or below zero (runs test p < 0.05) for %s: the model may not describe "
+                         "the data's shape well." % ", ".join(runs_note))
+    # Do the curves differ? Extra sum-of-squares F test, global (shared) vs separate fits
+    comp = S.get("compare", "")
+    if comp and len(fits) >= 2:
+        shared = list(pnames) if comp == "all" else [comp] if comp in pnames else []
+        if shared:
+            try:
+                Fv, df1, df2, p = _extra_ss_test(f, pnames, shared, fits)
+                what = "all parameters" if comp == "all" else comp
+                summary.append({"label": "Do the curves differ? (%s)" % what,
+                                "value": "F(%d, %d) = %.3f, %s" % (df1, df2, Fv, fmt_p(p)), "p": _r(p)})
+                notes.append("Extra sum-of-squares F test: one %s shared by every curve vs a separate one for each. A small p "
+                             "means the curves differ in %s." % ("curve" if comp == "all" else comp, what))
+            except Exception as e:
+                notes.append("The curve comparison couldn't be computed (%s)." % str(e)[:80])
+    tables = [{"title": "Best-fit values (%s)" % name, "columns": ["Curve", "Parameter", "Value", "SE", "95% CI low", "95% CI high"],
+               "rows": rows}]
+    meth = ("Data were fitted by %s regression to the model %s (%s)%s, with 95%% confidence intervals from the asymptotic "
+            "standard errors. %s%s"
+            % ("linear least-squares" if model in ("linear", "poly2", "poly3") else "nonlinear least-squares",
+               name.lower(), formula, {"1/y": ", weighted by 1/Y", "1/y2": ", weighted by 1/Y²"}.get(wmode, ""),
+               "Curves were compared with an extra sum-of-squares F test. " if comp and len(fits) >= 2 else "", _software_line()))
+    return {"figures": figures, "tables": tables, "summary": summary, "notes": notes, "methods": meth,
+            "groups": [c[0] for c in curves]}
+
+
+def _extra_ss_test(f, pnames, shared, fits):
+    k, m = len(pnames), len(fits)
+    sse_sep = sum(_fit_one(f, px, py, list(popt), w)[2] for _, popt, px, py, w in fits)
+    n_tot = sum(len(px) for _, _, px, _, _ in fits)
+    df_sep = n_tot - k * m
+    own = [p for p in pnames if p not in shared]
+    X = np.concatenate([px for _, _, px, _, _ in fits])
+    Yc = np.concatenate([py for _, _, _, py, _ in fits])
+    Wc = np.concatenate([w if w is not None else np.ones(len(px)) for _, _, px, _, w in fits])
+    ids = np.concatenate([np.full(len(px), i) for i, (_, _, px, _, _) in enumerate(fits)])
+    p_start = [float(np.mean([dict(zip(pnames, popt))[p] for _, popt, _, _, _ in fits])) for p in shared]
+    for _, popt, _, _, _ in fits:
+        P = dict(zip(pnames, popt))
+        p_start += [P[p] for p in own]
+
+    def gf(_x, *theta):
+        out = np.empty(len(X))
+        sh = dict(zip(shared, theta[:len(shared)]))
+        for i in range(m):
+            o = theta[len(shared) + i * len(own): len(shared) + (i + 1) * len(own)]
+            P = dict(sh)
+            P.update(zip(own, o))
+            sel = ids == i
+            out[sel] = f(X[sel], *[P[p] for p in pnames])
+        return out
+    popt, _ = curve_fit(gf, X, Yc, p0=p_start, sigma=1 / np.sqrt(Wc), maxfev=60000)
+    r = Yc - gf(X, *popt)
+    sse_glob = float(np.sum(Wc * r ** 2))
+    df_glob = n_tot - (len(shared) + len(own) * m)
+    df1 = df_glob - df_sep
+    if df1 <= 0 or df_sep <= 0:
+        raise ValueError("not enough points")
+    F = ((sse_glob - sse_sep) / df1) / (sse_sep / df_sep)
+    return F, df1, df_sep, float(stats.f.sf(F, df1, df_sep))
+
+
+# ----------------------------------------------------------------------------
+# Contingency tables: chi-square, Fisher's exact, odds ratio, relative risk
+# ----------------------------------------------------------------------------
+
+def analysis_contingency(datasets, S, s):
+    d = _pick_dataset(datasets, S.get("dataset"))
+    df, info = read_table(d["text"])
+    notes = []
+    text, num = _text_cols(df, info), _numeric_cols(df, info)
+    layout = S.get("layout", "counts")
+    if layout == "raw":
+        rcol = _choose(S, "row_col", df, text[0] if text else None, notes, "group")
+        ccol = _choose(S, "col_col", df, next((c for c in df.columns if c != rcol), None), notes, "outcome")
+        if not rcol or not ccol or rcol == ccol:
+            raise UserError("Choose two different columns: the groups and the outcome.")
+        rl, cl = _labels(df, rcol, info), _labels(df, ccol, info)
+        rows_l = _levels(rl, S.get("row_order"))
+        cols_l = _levels(cl, S.get("col_order"))
+        obs = np.array([[int(((rl == r) & (cl == c)).sum()) for c in cols_l] for r in rows_l], float)
+        row_name, col_name = rcol, ccol
+    else:
+        rcol = S.get("row_col") if S.get("row_col") in df.columns else (text[0] if text else None)
+        ccols = [c for c in (S.get("count_cols") or []) if c in df.columns and c != rcol] or [c for c in num if c != rcol]
+        if not ccols:
+            raise UserError("Paste a table of counts: one row per group, one column per outcome.")
+        rows_l = [str(v) for v in (_labels(df, rcol, info) if rcol else pd.Series(["Row %d" % (i + 1) for i in range(len(df))]))]
+        M = np.column_stack([pd.to_numeric(df[c], errors="coerce").to_numpy(float) for c in ccols])
+        keep = np.isfinite(M).any(axis=1)
+        M = np.nan_to_num(M[keep])
+        rows_l = [r for r, k in zip(rows_l, keep) if k]
+        order = _order(rows_l, S.get("row_order"))
+        M = np.array([M[rows_l.index(r)] for r in order])
+        rows_l = order
+        cols_l = _order(list(ccols), S.get("col_order"))
+        obs = np.column_stack([M[:, list(ccols).index(c)] for c in cols_l])
+        row_name, col_name = rcol or "Group", "Outcome"
+        if (obs < 0).any() or (np.abs(obs - np.round(obs)) > 1e-9).any():
+            raise UserError("Counts must be whole numbers of 0 or more. Use Compare groups for measurements.")
+    if obs.shape[0] < 2 or obs.shape[1] < 2:
+        raise UserError("A contingency table needs at least 2 groups and 2 outcomes (found %d × %d)." % obs.shape)
+    keep_r, keep_c = obs.sum(axis=1) > 0, obs.sum(axis=0) > 0
+    if not keep_r.all() or not keep_c.all():
+        notes.append("Rows or columns with no counts were left out.")
+        obs = obs[keep_r][:, keep_c]
+        rows_l = [r for r, k in zip(rows_l, keep_r) if k]
+        cols_l = [c for c, k in zip(cols_l, keep_c) if k]
+    N = obs.sum()
+    expected = np.outer(obs.sum(axis=1), obs.sum(axis=0)) / N
+    test = S.get("test", "auto")
+    is22 = obs.shape == (2, 2)
+    summary = []
+    if is22 and (test == "fisher" or (test == "auto" and expected.min() < 5) or (test == "auto" and N < 1000)):
+        odds, p = stats.fisher_exact(obs)
+        tname, line = "Fisher's exact test", "%s (two-sided)" % fmt_p(p)
+    else:
+        if test == "fisher" and not is22:
+            notes.append("Fisher's exact test is only available for 2 × 2 tables here; the chi-square test was used.")
+        corr = bool(S.get("yates", False)) and is22
+        chi2, p, dof, _ = stats.chi2_contingency(obs, correction=corr)
+        tname = "Chi-square test%s" % (" with Yates' correction" if corr else "")
+        line = "χ²(%d) = %.3f, %s, N = %d" % (dof, chi2, fmt_p(p), N)
+        if (expected < 5).mean() > 0.2 or expected.min() < 1:
+            notes.append("Some expected counts are small (below 5), so the chi-square approximation may be unreliable."
+                         + (" Fisher's exact test would be better." if is22 else " Consider combining categories."))
+    chi2_v = stats.chi2_contingency(obs, correction=False)[0]
+    cramer = math.sqrt(chi2_v / (N * (min(obs.shape) - 1)))
+    summary.append({"label": tname, "value": line + ", Cramér's V = %.2f" % cramer, "p": _r(p)})
+    assoc_rows = []
+    if is22:
+        a, b, c, dd = obs.ravel()
+        aa, bb, cc, d2 = (a, b, c, dd) if min(a, b, c, dd) > 0 else (a + 0.5, b + 0.5, c + 0.5, dd + 0.5)
+        OR = (aa * d2) / (bb * cc)
+        se_or = math.sqrt(1 / aa + 1 / bb + 1 / cc + 1 / d2)
+        z = 1.959964
+        r1, r2 = aa / (aa + bb), cc / (cc + d2)
+        RR = r1 / r2
+        se_rr = math.sqrt(1 / aa - 1 / (aa + bb) + 1 / cc - 1 / (cc + d2))
+        rd = a / (a + b) - c / (c + dd)
+        se_rd = math.sqrt((a / (a + b)) * (1 - a / (a + b)) / (a + b) + (c / (c + dd)) * (1 - c / (c + dd)) / (c + dd))
+        assoc_rows = [["Odds ratio", _r(OR), _r(OR * math.exp(-z * se_or)), _r(OR * math.exp(z * se_or))],
+                      ["Relative risk", _r(RR), _r(RR * math.exp(-z * se_rr)), _r(RR * math.exp(z * se_rr))],
+                      ["Risk difference", _r(rd), _r(rd - z * se_rd), _r(rd + z * se_rd)]]
+        if min(a, b, c, dd) == 0:
+            notes.append("A cell has 0 counts, so 0.5 was added to every cell for the odds ratio and relative risk.")
+        summary.append({"label": "Odds ratio (%s, %s)" % (rows_l[0], cols_l[0]),
+                        "value": "OR = %s (95%% CI %s to %s); relative risk %s (%s to %s)" % (
+                            _fmt(OR), _fmt(assoc_rows[0][2]), _fmt(assoc_rows[0][3]), _fmt(RR), _fmt(assoc_rows[1][2]),
+                            _fmt(assoc_rows[1][3])), "p": None})
+    # Figure: stacked percent bars by default
+    display = S.get("display", "stacked_pct")
+    G = _gstyles(s, cols_l)
+    fig, ax = _new_fig(s)
+    H = s["orientation"] == "horizontal"
+    bw = s["bar_width"]
+    lw = s["edge_width"]
+    pct = obs / obs.sum(axis=1, keepdims=True) * 100
+    with plt.rc_context(_rc(s)):
+        xs = np.arange(len(rows_l), dtype=float)
+        base = np.zeros(len(rows_l))
+        for j, g in enumerate(G):
+            if s["fill"] == "outline":
+                face = (0, 0, 0, 0)
+            elif s["fill"] == "light":
+                face = to_rgba(g["color"], max(0.35, s["fill_alpha"] * 2.2))
+            else:
+                face = to_rgba(g["color"], 0.92)
+            kw = dict(color=face, edgecolor=g["color"] if s["fill"] != "solid" else s["bg"], linewidth=lw * 0.7,
+                      hatch=g["hatch"], label=g["label"], zorder=2)
+            if display == "grouped":
+                step = 0.84 / len(G)
+                pos = xs + (j - (len(G) - 1) / 2) * step
+                vals = obs[:, j]
+                bars = (ax.barh(pos, vals, height=step * 0.92, **kw) if H else ax.bar(pos, vals, width=step * 0.92, **kw))
+            else:
+                vals = pct[:, j] if display == "stacked_pct" else obs[:, j]
+                bars = (ax.barh(xs, vals, height=bw, left=base, **kw) if H else ax.bar(xs, vals, width=bw, bottom=base, **kw))
+                if S.get("labels", True):
+                    for k_, b in enumerate(bars):
+                        v = vals[k_]
+                        if v <= 0 or (display == "stacked_pct" and v < 6):
+                            continue
+                        txt = "%.0f%%" % pct[k_, j] if display == "stacked_pct" else "%d" % obs[k_, j]
+                        cx = b.get_x() + b.get_width() / 2
+                        cy = b.get_y() + b.get_height() / 2
+                        eff = [face[q] * face[3] + to_rgb(s["bg"])[q] * (1 - face[3]) for q in range(3)]
+                        light = 0.2126 * eff[0] + 0.7152 * eff[1] + 0.0722 * eff[2] > 0.5
+                        ax.text(cx, cy, txt, ha="center", va="center", fontsize=s["tick_size"] * 0.9,
+                                color="#1A1D23" if light else "#FFFFFF", zorder=4)
+                base = base + vals
+            for b in bars:
+                b._ll_bar = True
+        (ax.set_yticks if H else ax.set_xticks)(xs)
+        (ax.set_yticklabels if H else ax.set_xticklabels)(rows_l)
+        if H:
+            ax.set_ylim(len(rows_l) - 0.4, -0.6)
+        ax._ll_cat = "y" if H else "x"
+        vlabel = {"stacked_pct": "Percent of %s" % row_name.lower() if row_name else "Percent", "stacked": "Count",
+                  "grouped": "Count"}.get(display, "Count")
+        if display == "stacked_pct":
+            (ax.set_xlim if H else ax.set_ylim)(0, 100)
+        if s["legend"] == "best":
+            s = dict(s, legend="outside")
+        _finish(ax, s, xlabel=vlabel if H else row_name, ylabel=row_name if H else vlabel, legend=True,
+                title=s["title"] or ("%s, %s" % (tname.split(" with")[0].replace(" test", ""), fmt_p(p)) if S.get("annotate", True) else ""))
+    tables = [{"title": "Observed counts", "columns": [row_name] + cols_l + ["Total"],
+               "rows": [[r] + [int(v) for v in obs[i]] + [int(obs[i].sum())] for i, r in enumerate(rows_l)]
+               + [["Total"] + [int(v) for v in obs.sum(axis=0)] + [int(N)]]},
+              {"title": "Row percentages", "columns": [row_name] + cols_l,
+               "rows": [[r] + [_r(v, 4) for v in pct[i]] for i, r in enumerate(rows_l)]},
+              {"title": "Expected counts (if there were no association)", "columns": [row_name] + cols_l,
+               "rows": [[r] + [_r(v, 4) for v in expected[i]] for i, r in enumerate(rows_l)]}]
+    if assoc_rows:
+        tables.insert(1, {"title": "Association (2 × 2)", "columns": ["Measure", "Value", "95% CI low", "95% CI high"], "rows": assoc_rows})
+    meth = ("The association between %s and %s was tested with %s%s. %s%s"
+            % (row_name.lower(), col_name.lower(), tname if tname.startswith("Fisher") else "a " + tname[0].lower() + tname[1:],
+               " (Cramér's V as effect size)" if not is22 else "",
+               "Odds ratios and relative risks are given with Woolf/Katz 95% confidence intervals. " if is22 else "",
+               _software_line()))
+    return {"figures": [{"id": "contingency", "title": "Contingency", "fig": fig, "style": s}],
+            "tables": tables, "summary": summary, "notes": notes, "methods": meth, "groups": cols_l}
+
+
+# ----------------------------------------------------------------------------
+# Sample size and power (no data needed)
+# ----------------------------------------------------------------------------
+
+def _power(design, n, eff, alpha, sides, ratio=1.0, k=3):
+    n = float(n)
+    if design == "two":
+        n1, n2 = n, n * ratio
+        if n1 < 2 or n2 < 2:
+            return 0.0
+        dfv = n1 + n2 - 2
+        nc = eff * math.sqrt(n1 * n2 / (n1 + n2))
+        tc = stats.t.ppf(1 - alpha / sides, dfv)
+        return float(stats.nct.sf(tc, dfv, nc) + (stats.nct.cdf(-tc, dfv, nc) if sides == 2 else 0))
+    if design == "paired":
+        if n < 2:
+            return 0.0
+        dfv = n - 1
+        nc = eff * math.sqrt(n)
+        tc = stats.t.ppf(1 - alpha / sides, dfv)
+        return float(stats.nct.sf(tc, dfv, nc) + (stats.nct.cdf(-tc, dfv, nc) if sides == 2 else 0))
+    if design == "anova":
+        N = n * k
+        if n < 2:
+            return 0.0
+        df1, df2 = k - 1, N - k
+        fc = stats.f.ppf(1 - alpha, df1, df2)
+        return float(stats.ncf.sf(fc, df1, df2, eff ** 2 * N))
+    if design == "props":
+        n1, n2 = n, n * ratio
+        z = stats.norm.ppf(1 - alpha / sides)
+        val = abs(eff) * math.sqrt(n1 * n2 / (n1 + n2))
+        return float(stats.norm.cdf(val - z) + (stats.norm.cdf(-val - z) if sides == 2 else 0))
+    if design == "corr":
+        if n <= 3:
+            return 0.0
+        z = stats.norm.ppf(1 - alpha / sides)
+        val = abs(math.atanh(min(abs(eff), 0.999999))) * math.sqrt(n - 3)
+        return float(stats.norm.cdf(val - z) + (stats.norm.cdf(-val - z) if sides == 2 else 0))
+    raise UserError("Unknown design.")
+
+
+def _n_for(design, eff, alpha, power, sides, ratio, k):
+    if eff == 0:
+        return None
+    lo = 2 if design != "corr" else 4
+    if _power(design, lo, eff, alpha, sides, ratio, k) >= power:
+        return lo
+    hi = lo
+    while _power(design, hi, eff, alpha, sides, ratio, k) < power:
+        hi *= 2
+        if hi > 1e7:
+            return None
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if _power(design, mid, eff, alpha, sides, ratio, k) >= power:
+            hi = mid
+        else:
+            lo = mid
+    return hi
+
+
+def analysis_power(datasets, S, s):
+    notes = []
+    design = S.get("design", "two")
+    alpha = _f(S, "alpha", 0.05)
+    if not 0 < alpha < 0.5:
+        raise UserError("Alpha should be between 0 and 0.5 (usually 0.05).")
+    target = _f(S, "power", 0.8)
+    if target > 1:
+        target /= 100.0
+    if not 0.05 < target < 0.9999:
+        raise UserError("Power should be between 0.05 and 0.9999 (usually 0.8 or 0.9).")
+    sides = 1 if S.get("sides") == "one" else 2
+    ratio = _f(S, "ratio", 1.0) or 1.0
+    k = int(_f(S, "k", 3) or 3)
+    dropout = (_f(S, "dropout", 0.0) or 0.0)
+    dropout = dropout / 100 if dropout >= 1 else dropout
+    entry = S.get("entry", "raw")
+    unit = S.get("unit") or ""
+    if design == "two" or design == "paired":
+        if entry == "raw":
+            m1, m2, sd = _f(S, "mean1", None), _f(S, "mean2", None), _f(S, "sd", None)
+            if m1 is None or m2 is None or not sd:
+                raise UserError("Enter both expected means and the standard deviation (or switch to effect size).")
+            eff = abs(m2 - m1) / sd
+            eff_txt = "a difference of %s%s (from %s to %s, SD %s; %s = %.2f)" % (
+                _fmt(abs(m2 - m1)), " " + unit if unit else "", _fmt(m1), _fmt(m2), _fmt(sd),
+                "Cohen's dz" if design == "paired" else "Cohen's d", eff)
+            if design == "paired":
+                eff_txt = eff_txt.replace("SD", "SD of the differences")
+        else:
+            eff = abs(_f(S, "effect", 0.8) or 0.8)
+            eff_txt = "an effect size of %s = %.2f" % ("dz" if design == "paired" else "d", eff)
+        eff_name = "dz" if design == "paired" else "d"
+    elif design == "anova":
+        if entry == "raw":
+            means = [float(x) for x in re.findall(r"-?\d+\.?\d*(?:[eE][-+]?\d+)?", str(S.get("means") or ""))]
+            sd = _f(S, "sd", None)
+            if len(means) < 2 or not sd:
+                raise UserError("Enter the expected group means (e.g. 10, 12, 15) and the standard deviation.")
+            k = len(means)
+            eff = float(np.std(means)) / sd
+            eff_txt = "group means of %s (SD %s; Cohen's f = %.2f)" % (", ".join(_fmt(m) for m in means), _fmt(sd), eff)
+        else:
+            eff = abs(_f(S, "effect", 0.25) or 0.25)
+            eff_txt = "an effect size of f = %.2f across %d groups" % (eff, k)
+        if k < 2:
+            raise UserError("ANOVA needs at least 2 groups.")
+        eff_name = "f"
+    elif design == "props":
+        p1, p2 = _f(S, "p1", None), _f(S, "p2", None)
+        if p1 is None or p2 is None:
+            raise UserError("Enter the two expected proportions, e.g. 0.30 and 0.10 (or 30 and 10 for percent).")
+        if p1 > 1 or p2 > 1:
+            p1, p2 = p1 / 100, p2 / 100
+        if not (0 < p1 < 1 and 0 < p2 < 1):
+            raise UserError("Proportions must be between 0 and 1 (or 0 and 100%).")
+        eff = abs(2 * math.asin(math.sqrt(p1)) - 2 * math.asin(math.sqrt(p2)))
+        eff_txt = "proportions of %.0f%% vs %.0f%% (Cohen's h = %.2f)" % (p1 * 100, p2 * 100, eff)
+        eff_name = "h"
+    elif design == "corr":
+        eff = abs(_f(S, "r", 0.5) or 0.5)
+        if eff >= 1:
+            raise UserError("The correlation must be between -1 and 1.")
+        eff_txt = "a correlation of r = %.2f" % eff
+        eff_name = "r"
+    else:
+        raise UserError("Unknown design.")
+    if eff <= 0:
+        raise UserError("The expected effect is zero, so no sample size can detect it.")
+    solve = S.get("solve", "n")
+    test_name = {"two": "two-sample t-test", "paired": "paired t-test", "anova": "one-way ANOVA",
+                 "props": "comparison of two proportions", "corr": "test of a correlation"}[design]
+    per = {"two": "per group", "paired": "pairs", "anova": "per group", "props": "per group", "corr": "in total"}[design]
+    summary = []
+    if solve == "power":
+        n_have = _f(S, "n", 10) or 10
+        pw = _power(design, n_have, eff, alpha, sides, ratio, k)
+        n_req = _n_for(design, eff, alpha, target, sides, ratio, k)
+        summary.append({"label": "Power", "value": "%.1f%% with n = %d %s" % (pw * 100, n_have, per), "p": None})
+        if n_req:
+            summary.append({"label": "For %.0f%% power" % (target * 100), "value": "n = %d %s" % (n_req, per), "p": None})
+        headline = n_have
+        meth_core = ("With n = %d %s, α = %g (%s-sided) and %s, a %s has %.0f%% power." % (
+            n_have, per, alpha, "two" if sides == 2 else "one", eff_txt, test_name, pw * 100))
+    elif solve == "effect":
+        n_have = _f(S, "n", 10) or 10
+        lo_e, hi_e = 1e-4, 50.0 if design not in ("corr",) else 0.9999
+        if _power(design, n_have, hi_e, alpha, sides, ratio, k) < target:
+            raise UserError("Even a huge effect can't reach that power with so few subjects.")
+        for _ in range(80):
+            mid = (lo_e + hi_e) / 2
+            if _power(design, n_have, mid, alpha, sides, ratio, k) >= target:
+                hi_e = mid
+            else:
+                lo_e = mid
+        mde = hi_e
+        if design in ("two", "paired") and entry == "raw" and _f(S, "sd", None):
+            extra = " = a difference of %s%s" % (_fmt(mde * _f(S, "sd", 1)), " " + unit if unit else "")
+        else:
+            extra = ""
+        summary.append({"label": "Smallest detectable effect", "value": "%s = %.3f%s (n = %d %s, %.0f%% power)" % (
+            eff_name, mde, extra, n_have, per, target * 100), "p": None})
+        headline = n_have
+        eff = mde
+        meth_core = ("With n = %d %s, α = %g (%s-sided) and %.0f%% power, the smallest effect a %s can detect is %s = %.2f%s." % (
+            n_have, per, alpha, "two" if sides == 2 else "one", target * 100, test_name, eff_name, mde, extra))
+    else:
+        n_req = _n_for(design, eff, alpha, target, sides, ratio, k)
+        if n_req is None:
+            raise UserError("The effect is too small to reach that power with any realistic sample size.")
+        n_drop = int(math.ceil(n_req / (1 - dropout))) if dropout > 0 else n_req
+        total = n_req * (1 + ratio) if design in ("two", "props") else n_req * k if design == "anova" else n_req
+        line = "n = %d %s" % (n_req, per)
+        if design in ("two", "props") and abs(ratio - 1) > 1e-9:
+            line = "n = %d and %d (ratio %g)" % (n_req, int(math.ceil(n_req * ratio)), ratio)
+        if design in ("two", "props", "anova"):
+            line += " · %d in total" % int(math.ceil(total))
+        summary.append({"label": "Required sample size", "value": line, "p": None})
+        summary.append({"label": "Achieved power", "value": "%.1f%%" % (_power(design, n_req, eff, alpha, sides, ratio, k) * 100), "p": None})
+        if dropout > 0:
+            summary.append({"label": "Allowing for %.0f%% dropout" % (dropout * 100), "value": "enroll %d %s" % (n_drop, per), "p": None})
+        headline = n_req
+        meth_core = ("To detect %s with %.0f%% power at α = %g (%s-sided) using a %s, %d %s are required%s." % (
+            eff_txt, target * 100, alpha, "two" if sides == 2 else "one", test_name, n_req,
+            "subjects " + per if design != "paired" else "pairs",
+            "; allowing for %.0f%% attrition, %d %s will be enrolled" % (dropout * 100, n_drop, per) if dropout > 0 else ""))
+    # Figure: power curves for the expected effect and +/- 25%
+    G = _gstyles(s, ["Smaller effect", "Expected effect", "Larger effect"])
+    fig, ax = _new_fig(s)
+    lw = s["line_width"]
+    n_max = max(10, int(headline * 2.2) if headline else 40)
+    n_lo = 4 if design == "corr" else 2
+    ns = np.unique(np.linspace(n_lo, n_max, min(200, n_max - n_lo + 1)).astype(int))
+    with plt.rc_context(_rc(s)):
+        for g, mult in zip(G, (0.75, 1.0, 1.25)):
+            e = min(eff * mult, 0.9999) if design == "corr" else eff * mult
+            pw = [_power(design, n_, e, alpha, sides, ratio, k) * 100 for n_ in ns]
+            ax.plot(ns, pw, color=g["color"], lw=lw * (1.6 if mult == 1 else 1.0), ls=g["ls"] if mult == 1 else (0, (4, 2)),
+                    zorder=3 if mult == 1 else 2, label="%s (%s = %.2f)" % (g["label"], eff_name, e))
+        ax.axhline(target * 100, color=to_rgba(s["fg"], 0.45), lw=max(0.6, lw * 0.6), ls=(0, (2, 2)), zorder=1)
+        if headline:
+            hp = _power(design, headline, eff, alpha, sides, ratio, k) * 100
+            ax.plot([headline, headline], [0, hp], color=to_rgba(G[1]["color"], 0.6), lw=max(0.6, lw * 0.7), ls=(0, (3, 2)), zorder=2)
+            ax.scatter([headline], [hp], s=(s["marker_size"] * 1.6) ** 2, color=G[1]["color"], edgecolor=s["bg"],
+                       linewidth=1, zorder=5)
+            ax.annotate("n = %d" % headline, xy=(headline, hp), xytext=(6, -14), textcoords="offset points",
+                        fontsize=s["font_size"] * 0.9, color=s["fg"])
+        ax.set_ylim(0, 102)
+        ax.set_xlim(ns.min(), ns.max())
+        ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+        _finish(ax, s, xlabel="Sample size (%s)" % per, ylabel="Power (%)", legend=True)
+    # Table of n across power levels and effects
+    rows = []
+    for mult in (0.5, 0.75, 1.0, 1.25, 1.5):
+        e = min(eff * mult, 0.9999) if design == "corr" else eff * mult
+        rows.append(["%.3f%s" % (e, " (expected)" if mult == 1 else "")] +
+                    [_n_for(design, e, alpha, pw, sides, ratio, k) for pw in (0.7, 0.8, 0.9, 0.95)])
+    tables = [{"title": "Sample size %s for other effects and power levels" % per,
+               "columns": ["Effect (%s)" % eff_name, "70% power", "80% power", "90% power", "95% power"], "rows": rows}]
+    if design in ("two", "paired") and eff > 2.5:
+        notes.append("That's a very large effect (%s = %.1f). Make sure the SD is realistic; pilot data or published "
+                     "studies are the best source." % (eff_name, eff))
+    if design in ("two", "paired", "anova"):
+        notes.append("Sample sizes assume roughly normal data. For a non-parametric test, add about 15%.")
+    meth = ("Sample size was calculated a priori. %s Calculations used the %s distribution. %s" % (
+        meth_core, {"two": "noncentral t", "paired": "noncentral t", "anova": "noncentral F",
+                    "props": "normal (arcsine-transformed)", "corr": "normal (Fisher z)"}[design], _software_line()))
+    return {"figures": [{"id": "power", "title": "Power curve", "fig": fig, "style": s}],
+            "tables": tables, "summary": summary, "notes": notes, "methods": meth,
+            "groups": ["Smaller effect", "Expected effect", "Larger effect"]}
+
+
+# ----------------------------------------------------------------------------
+# Outliers (used by Compare groups)
+# ----------------------------------------------------------------------------
+
+def grubbs_outliers(v, alpha=0.05):
+    """Iterative two-sided Grubbs test. Returns indices (into v) of outliers."""
+    v = np.asarray(v, float)
+    idx = np.where(np.isfinite(v))[0]
+    out = []
+    while len(idx) >= 3:
+        x = v[idx]
+        n = len(x)
+        sd = np.std(x, ddof=1)
+        if n < 3 or sd == 0:
+            break
+        dev = np.abs(x - x.mean())
+        j = int(np.argmax(dev))
+        G = dev[j] / sd
+        t = stats.t.ppf(1 - alpha / (2 * n), n - 2)
+        crit = (n - 1) / math.sqrt(n) * math.sqrt(t ** 2 / (n - 2 + t ** 2))
+        if G <= crit:
+            break
+        out.append(int(idx[j]))
+        idx = np.delete(idx, j)
+        if len(idx) < 3:
+            break
+    return out
+
+
+def iqr_outliers(v, k=1.5):
+    v = np.asarray(v, float)
+    fin = v[np.isfinite(v)]
+    if len(fin) < 4:
+        return []
+    q1, q3 = np.percentile(fin, [25, 75])
+    lo, hi = q1 - k * (q3 - q1), q3 + k * (q3 - q1)
+    return [int(i) for i in np.where(np.isfinite(v) & ((v < lo) | (v > hi)))[0]]
+
+
+# ----------------------------------------------------------------------------
+# Multi-panel figures (the board)
+# ----------------------------------------------------------------------------
+
+def _svg_size_pt(svg):
+    m = re.search(r'<svg[^>]*?width="([\d.]+)pt"[^>]*?height="([\d.]+)pt"', svg)
+    if not m:
+        return 288.0, 216.0
+    return float(m.group(1)), float(m.group(2))
+
+
+def board(panels, cols=2, width=7.0, fmt="png", dpi=300, letters="A", letter_size=14, gap=0.15, transparent=False):
+    """Lay out several figures in a grid with panel letters. panels: [{config, datasets, index}]."""
+    if not panels:
+        raise UserError("Add figures to the board first.")
+    if fmt not in ("png", "svg", "tiff", "jpg", "pdf"):
+        raise UserError("Unknown format %s." % fmt)
+    cols = max(1, min(int(cols or 2), 6))
+    rendered = []
+    try:
+        for k, p in enumerate(panels):
+            out = _render(p["config"], p.get("datasets") or [])
+            figs = out["figures"]
+            i = min(int(p.get("index", 0)), len(figs) - 1)
+            f = figs[i]
+            rendered.append((f, _svg(f["fig"], f["style"])))
+            for j, other in enumerate(figs):
+                if j != i:
+                    plt.close(other["fig"])
+        sizes = [_svg_size_pt(svg) for _, svg in rendered]
+        bg = rendered[0][0]["style"]["bg"]
+        fg = rendered[0][0]["style"]["fg"]
+        font = FONTS.get(rendered[0][0]["style"].get("font"), FONTS["sans"])
+        gap_pt = float(gap or 0) * 72
+        natural = width is None or float(width or 0) <= 0
+        if natural:
+            cell_w = max(w for w, _ in sizes)
+        else:
+            cell_w = (float(width) * 72 - gap_pt * (cols - 1)) / cols
+        lay, y = [], 0.0
+        letter_pt = float(letter_size or 0) if letters and letters != "none" else 0.0
+        top_pad = letter_pt * 0.15
+        for r0 in range(0, len(rendered), cols):
+            row = list(range(r0, min(r0 + cols, len(rendered))))
+            scales = [min(cell_w / sizes[k][0], 3.0) for k in row]
+            hs = [sizes[k][1] * sc for k, sc in zip(row, scales)]
+            row_h = max(hs) + top_pad
+            for c, (k, sc) in enumerate(zip(row, scales)):
+                lay.append((k, c * (cell_w + gap_pt), y + top_pad, sizes[k][0] * sc, sizes[k][1] * sc, sc))
+            y += row_h + gap_pt
+        W, Hh = cols * cell_w + gap_pt * (cols - 1), y - gap_pt
+        if len(rendered) < cols:
+            W = len(rendered) * cell_w + gap_pt * (len(rendered) - 1)
+
+        def letter(k):
+            if not letters or letters == "none":
+                return ""
+            base = "a" if letters in ("a", "a)", "(a)") else "A"
+            ch = chr(ord(base) + k) if k < 26 else str(k + 1)
+            return {"A)": ch + ")", "a)": ch + ")", "(A)": "(" + ch + ")", "(a)": "(" + ch + ")"}.get(letters, ch)
+
+        if fmt == "svg":
+            parts = ['<?xml version="1.0" encoding="utf-8"?>',
+                     '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
+                     'width="%.2fpt" height="%.2fpt" viewBox="0 0 %.2f %.2f" version="1.1">' % (W, Hh, W, Hh)]
+            if not transparent:
+                parts.append('<rect width="100%%" height="100%%" fill="%s"/>' % to_hex(bg))
+            for k, x, y0, w, h, sc in lay:
+                svg = rendered[k][1]
+                pre = "p%d_" % k
+                svg = re.sub(r'id="([^"]+)"', lambda m: 'id="%s%s"' % (pre, m.group(1)), svg)
+                svg = re.sub(r'url\(#([^)]+)\)', lambda m: 'url(#%s%s)' % (pre, m.group(1)), svg)
+                svg = re.sub(r'xlink:href="#([^"]+)"', lambda m: 'xlink:href="#%s%s"' % (pre, m.group(1)), svg)
+                svg = re.sub(r'href="#([^"]+)"', lambda m: 'href="#%s%s"' % (pre, m.group(1)) if not m.group(1).startswith(pre) else m.group(0), svg)
+                svg = re.sub(r'<svg([^>]*?)width="[\d.]+pt"([^>]*?)height="[\d.]+pt"',
+                             lambda m: '<svg%sx="%.2f" y="%.2f" width="%.2f"%sheight="%.2f"' % (m.group(1), x, y0, w, m.group(2), h), svg, count=1)
+                parts.append(svg)
+            for k, x, y0, w, h, sc in lay:
+                lt = letter(k)
+                if lt:
+                    parts.append('<text x="%.2f" y="%.2f" font-family="%s" font-size="%.1f" font-weight="bold" fill="%s">%s</text>' % (
+                        x + 1, y0 - top_pad + letter_pt * 0.85, ", ".join(font).replace('"', ""), letter_pt, to_hex(fg), lt))
+            parts.append("</svg>")
+            return base64.b64encode("\n".join(parts).encode("utf-8")).decode("ascii")
+        # Raster: render each panel at the resolution it will be shown at, then paste
+        from PIL import Image, ImageDraw, ImageFont
+        px = lambda v: int(round(v / 72.0 * dpi))
+        mode = "RGBA" if transparent and fmt == "png" else "RGB"
+        bgc = (0, 0, 0, 0) if mode == "RGBA" else tuple(int(c * 255) for c in to_rgb(bg))
+        canvas = Image.new(mode, (max(1, px(W)), max(1, px(Hh))), bgc)
+        for k, x, y0, w, h, sc in lay:
+            f = rendered[k][0]
+            buf = io.BytesIO()
+            with plt.rc_context(_rc(f["style"])):
+                f["fig"].savefig(buf, format="png", dpi=dpi * sc, bbox_inches="tight", pad_inches=0.08,
+                                 transparent=bool(transparent), facecolor="none" if transparent else f["style"]["bg"])
+            buf.seek(0)
+            im = Image.open(buf).convert("RGBA")
+            target = (max(1, px(w)), max(1, px(h)))
+            if im.size != target:
+                im = im.resize(target, Image.LANCZOS)
+            canvas.paste(im, (px(x), px(y0)), im)
+        if letter_pt:
+            draw = ImageDraw.Draw(canvas)
+            try:
+                path = font_manager.findfont(font_manager.FontProperties(family=font, weight="bold"))
+                pil_font = ImageFont.truetype(path, max(6, px(letter_pt)))
+            except Exception:
+                pil_font = ImageFont.load_default()
+            fgc = tuple(int(c * 255) for c in to_rgb(fg))
+            for k, x, y0, w, h, sc in lay:
+                lt = letter(k)
+                if lt:
+                    draw.text((px(x + 1), px(y0 - top_pad)), lt, fill=fgc, font=pil_font)
+        out = io.BytesIO()
+        if fmt == "png":
+            canvas.save(out, format="PNG", dpi=(dpi, dpi))
+        elif fmt == "tiff":
+            canvas.convert("RGB").save(out, format="TIFF", dpi=(dpi, dpi), compression="tiff_lzw")
+        elif fmt == "jpg":
+            canvas.convert("RGB").save(out, format="JPEG", dpi=(dpi, dpi), quality=95)
+        else:
+            canvas.convert("RGB").save(out, format="PDF", resolution=float(dpi))
+        return base64.b64encode(out.getvalue()).decode("ascii")
+    finally:
+        for f, _ in rendered:
+            plt.close(f["fig"])
+
+
 ANALYSES = {
     "compare": analysis_compare,
     "timecourse": analysis_timecourse,
     "correlation": analysis_correlation,
     "dose": analysis_dose,
     "survival": analysis_survival,
+    "twoway": analysis_twoway,
+    "qpcr": analysis_qpcr,
+    "stdcurve": analysis_stdcurve,
+    "curvefit": analysis_curvefit,
+    "contingency": analysis_contingency,
+    "power": analysis_power,
 }
+NO_DATA = {"power"}
 
 # ----------------------------------------------------------------------------
 # Running + exporting
@@ -2406,10 +4130,8 @@ def _run_user_code(code, fig, f, notes):
             f["title"].lower(), ", line %d" % line if line else "", type(e).__name__, e))
 
 
-def run(config, datasets):
-    for f in _LAST["figures"]:
-        plt.close(f["fig"])
-    _LAST["figures"] = []
+def _render(config, datasets):
+    """Run one analysis and finish its figures (polish + the user's own code). Doesn't touch _LAST."""
     kind = config.get("analysis", "compare")
     fn = ANALYSES.get(kind)
     if fn is None:
@@ -2423,6 +4145,17 @@ def run(config, datasets):
             _polish(f["fig"], f["style"], notes)
         if code:
             _run_user_code(code, f["fig"], f, notes)
+    out["notes"] = notes
+    out["_s"] = s
+    return out
+
+
+def run(config, datasets):
+    for f in _LAST["figures"]:
+        plt.close(f["fig"])
+    _LAST["figures"] = []
+    out = _render(config, datasets)
+    s, notes = out["_s"], out["notes"]
     _LAST["figures"] = out["figures"]
     figs = [{"id": f["id"], "title": f["title"], "svg": _svg(f["fig"], f["style"])} for f in out["figures"]]
     groups = [str(g) for g in out.get("groups", [])]
@@ -2431,7 +4164,7 @@ def run(config, datasets):
             "methods": out["methods"], "groups": groups,
             "group_styles": [{"name": g["name"], "color": to_hex(g["color"]), "label": g["label"]} for g in gs],
             "colors": {"bg": to_hex(s["bg"]), "fg": to_hex(s["fg"]), "ax_bg": to_hex(s["ax_bg"])},
-            "events": out.get("events", {})}
+            "events": out.get("events", {}), "meta": out.get("meta", {})}
 
 
 def export_figure(index, fmt, dpi=300, transparent=False):
@@ -2552,6 +4285,65 @@ def example(kind):
                               "text": _tsv(["Diet", "Days", "Died"], rows)}],
                 "settings": {"time_col": "Days", "event_col": "Died", "group_col": "Diet", "time_unit": "days",
                              "show_ci": True, "show_censors": True, "y_scale": "pct"}}
+    if kind == "twoway":
+        # Grip strength in wild-type and knockout mice given vehicle or drug: the drug rescues the knockout
+        rows = []
+        for geno, base in (("Wild type", 118.0), ("Knockout", 82.0)):
+            for treat, boost in (("Vehicle", 0.0), ("Drug", 1.0)):
+                gain = boost * (4.0 if geno == "Wild type" else 27.0)
+                for _ in range(7):
+                    rows.append([geno, treat, "%.1f" % (base + gain + rng.normal(0, 9))])
+        return {"datasets": [{"name": "Grip strength", "meta": {}, "text": _tsv(["Genotype", "Treatment", "Grip strength (g)"], rows)}],
+                "settings": {"layout": "long", "a_col": "Genotype", "b_col": "Treatment", "value_col": "Grip strength (g)",
+                             "posthoc": "within_a"}}
+    if kind == "qpcr":
+        # Instrument-style export: one row per well, three technical replicates
+        rows = []
+        effects = {"GAPDH": (0.0, 0.0), "IL6": (0.0, -2.6), "TNF": (0.0, -1.4), "MYC": (0.0, 0.25)}
+        base_ct = {"GAPDH": 18.2, "IL6": 29.4, "TNF": 27.1, "MYC": 24.6}
+        for group in ("Untreated", "Treated"):
+            for sidx in range(1, 5):
+                sample = "%s %d" % (group, sidx)
+                load = rng.normal(0, 0.35)
+                for gene in ("GAPDH", "IL6", "TNF", "MYC"):
+                    shift = effects[gene][1] if group == "Treated" else 0.0
+                    bio = rng.normal(0, 0.3) if gene != "GAPDH" else 0.0
+                    for _ in range(3):
+                        rows.append([sample, group, gene, "%.2f" % (base_ct[gene] + load + shift + bio + rng.normal(0, 0.12))])
+        return {"datasets": [{"name": "qPCR run", "meta": {}, "text": _tsv(["Sample Name", "Group", "Target Name", "CT"], rows)}],
+                "settings": {"layout": "long", "sample_col": "Sample Name", "group_col": "Group", "gene_col": "Target Name",
+                             "ct_col": "CT", "ref_genes": ["GAPDH"], "output": "fold", "posthoc": "control"}}
+    if kind == "stdcurve":
+        # ELISA: two-fold standard series in duplicate, a blank, and unknown samples (concentration left empty)
+        a, b, c, dd = 0.06, 1.35, 180.0, 2.9
+        f4 = lambda x: dd + (a - dd) / (1 + (x / c) ** b)
+        rows = []
+        for conc in (0, 7.8, 15.6, 31.25, 62.5, 125, 250, 500, 1000):
+            sig = f4(conc) if conc else a
+            rows.append(["Standard %g" % conc if conc else "Blank", conc] + ["%.3f" % (sig * (1 + rng.normal(0, 0.03)) + rng.normal(0, 0.002)) for _ in range(2)])
+        for k, true in enumerate((40, 95, 210, 330, 610, 18, 140, 1500), 1):
+            sig = f4(true)
+            rows.append(["Serum %02d" % k, ""] + ["%.3f" % (sig * (1 + rng.normal(0, 0.04))) for _ in range(2)])
+        return {"datasets": [{"name": "IL-6 ELISA", "meta": {}, "text": _tsv(["Sample", "Concentration", "OD450 a", "OD450 b"], rows)}],
+                "settings": {"conc_col": "Concentration", "name_col": "Sample", "model": "4pl", "blank": "subtract",
+                             "unit": "pg/mL", "dilution": 2, "y_name": "Absorbance (450 nm)", "x_name": "IL-6"}}
+    if kind == "curvefit":
+        # Enzyme kinetics for a wild-type and a mutant enzyme
+        sub = [0.5, 1, 2, 4, 8, 16, 32, 64, 128]
+        rows = []
+        for sv in sub:
+            wt = 52 * sv / (6.0 + sv) * (1 + rng.normal(0, 0.05))
+            mu = 47 * sv / (19.0 + sv) * (1 + rng.normal(0, 0.05))
+            rows.append([sv, "%.2f" % wt, "%.2f" % mu])
+        return {"datasets": [{"name": "Enzyme kinetics", "meta": {}, "text": _tsv(["Substrate (µM)", "Wild type", "Mutant"], rows)}],
+                "settings": {"x_col": "Substrate (µM)", "model": "mm", "compare": "Km", "y_name": "Velocity (nmol/min/mg)"}}
+    if kind == "contingency":
+        rows = [["Standard diet", 6, 34], ["High-fat diet", 17, 23]]
+        return {"datasets": [{"name": "Tumor incidence", "meta": {}, "text": _tsv(["Diet", "Tumor", "No tumor"], rows)}],
+                "settings": {"layout": "counts", "display": "stacked_pct", "test": "auto"}}
+    if kind == "power":
+        return {"datasets": [], "settings": {"design": "two", "entry": "raw", "mean1": 100, "mean2": 80, "sd": 15,
+                                             "unit": "mg/dL", "alpha": 0.05, "power": 0.8, "dropout": 10, "solve": "n"}}
     raise UserError("No example for %s" % kind)
 
 
@@ -2595,6 +4387,10 @@ def api(cmd, args_json):
             result = register_fonts(args.get("paths") or [])
         elif cmd == "versions":
             result = versions()
+        elif cmd == "board":
+            result = board(args.get("panels") or [], args.get("cols", 2), args.get("width", 7.0), args.get("format", "png"),
+                           int(float(args.get("dpi", 300) or 300)), args.get("letters", "A"), args.get("letter_size", 14),
+                           args.get("gap", 0.15), args.get("transparent", False))
         else:
             raise UserError("Unknown command %s" % cmd)
         return json.dumps({"ok": _clean(result)}, allow_nan=False)

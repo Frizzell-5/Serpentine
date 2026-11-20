@@ -10,7 +10,7 @@
 <meta property="og:description" content="Statistics and publication-quality figures from raw lab data. No code, nothing uploaded.">
 <meta property="og:image" content="https://frizzell-5.github.io/Serpentine/docs/screenshot.png">
 <meta property="og:type" content="website">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M21.5 6.5c-5.5 0-11 1.6-11 5.4s11 3.8 11 8.2-5.5 5.4-11 5.4' fill='none' stroke='%232456C7' stroke-width='3.2' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='6.5' r='2.9' fill='%232456C7'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M21.5 6.5c-5.5 0-11 1.6-11 5.4s11 3.8 11 8.2-5.5 5.4-11 5.4' fill='none' stroke='%23127055' stroke-width='3.2' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='6.5' r='2.9' fill='%23127055'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -24,8 +24,8 @@
   --muted: #56655F;
   --faint: #8A9893;
   --line: #D8DFDA;
-  --accent: #2456C7;
-  --accent-soft: #E2E9FB;
+  --accent: #127055;
+  --accent-soft: #DCEFE6;
   --accent-ink: #FFFFFF;
   --signal: #D1495B;
   --dot: rgba(19, 33, 32, 0.075);
@@ -247,7 +247,7 @@ footer .sp { margin-left: auto; }
   <!-- Hero -->
   <section class="hero">
     <div class="wrap">
-      <div class="eyebrow rise"><span>v0.7</span><i></i><span>Free</span><i></i><span>Runs in your browser</span></div>
+      <div class="eyebrow rise"><span>v0.8</span><i></i><span>Free</span><i></i><span>Runs in your browser</span></div>
       <h1 class="rise d1">Raw lab data in. <em>Publication figures</em> out.</h1>
       <p class="lede rise d2">Serpentine runs the statistics and draws the figures for you, using the same Python tools behind countless published studies. You choose everything from plain menus and never write a line of code. Your data stays on your computer.</p>
       <div class="cta rise d3">
@@ -283,7 +283,7 @@ footer .sp { margin-left: auto; }
         <p>The figure redraws every time you change a setting, so you can see what each choice does.</p>
       </div>
       <ol class="steps">
-        <li><span class="n">01</span><h3>Pick an analysis</h3><p>Compare groups, follow a recording over time, test a correlation, fit a dose-response curve or draw survival curves.</p></li>
+        <li><span class="n">01</span><h3>Pick an analysis</h3><p>Compare groups or two factors at once, follow a recording over time, fit any curve, read an ELISA, quantify qPCR, analyze counts, draw survival curves or plan your sample size.</p></li>
         <li><span class="n">02</span><h3>Add your data</h3><p>Paste straight from Excel, Prism or a LabChart Data Pad, or drop in CSV and Excel files.</p></li>
         <li><span class="n">03</span><h3>Set the analysis</h3><p>Baselines, exclusions, normalization, tests and comparisons, each one a plain setting.</p></li>
         <li><span class="n">04</span><h3>Style and export</h3><p>Choose a look, fine-tune colors and labels, then export figures, tables and methods text.</p></li>
@@ -338,7 +338,55 @@ footer .sp { margin-left: auto; }
           <div class="tags"><span>Kaplan-Meier</span><span>log-rank</span><span>hazard ratio</span><span>median survival</span><span>number at risk</span></div>
           <figcaption><span class="figlabel">Fig. 6 |</span> Lifespan of flies on three diets, log-rank test.</figcaption>
         </figure>
+        <figure class="card">
+          <div class="imgs"><img src="docs/img/g-twoway.png" alt="Grouped bar chart of grip strength in wild-type and knockout mice given vehicle or drug." loading="lazy"></div>
+          <h3>Two-way ANOVA</h3>
+          <p>Two factors at once, such as genotype and treatment. Main effects, the interaction and partial eta squared from Type III sums of squares, then Šidák or Tukey comparisons on a grouped plot. Long tables or Prism-style grouped tables.</p>
+          <div class="tags"><span>interaction</span><span>Type III</span><span>Šidák</span><span>Tukey</span><span>log transform</span></div>
+          <figcaption><span class="figlabel">Fig. 7 |</span> Grip strength: the drug rescues the knockout (interaction p = 0.002).</figcaption>
+        </figure>
+        <figure class="card">
+          <div class="imgs"><img src="docs/img/g-qpcr.png" alt="Fold change of three genes in untreated and treated samples." loading="lazy"></div>
+          <h3>qPCR gene expression</h3>
+          <p>Paste the Ct export from your instrument. Technical replicates are averaged and checked, reference genes are found automatically, and fold change is calculated by 2^-ΔΔCt, or by the Pfaffl method with your primer efficiencies. Statistics run on log2 fold change.</p>
+          <div class="tags"><span>2^-ΔΔCt</span><span>Pfaffl</span><span>reference genes</span><span>replicate QC</span></div>
+          <figcaption><span class="figlabel">Fig. 8 |</span> IL6, TNF and MYC relative to GAPDH.</figcaption>
+        </figure>
+        <figure class="card">
+          <div class="imgs"><img src="docs/img/g-stdcurve.png" alt="ELISA standard curve fitted with a four-parameter logistic model, unknowns marked on the curve." loading="lazy"></div>
+          <h3>Standard curve</h3>
+          <p>For ELISA, BCA, Bradford or any assay with standards. Fits 4PL, 5PL, linear or quadratic curves with optional weighting, subtracts the blank, interpolates the unknowns, applies dilutions, and flags samples outside the standard range, high replicate CVs and poor back-calculated standards. Reports LOD and LOQ.</p>
+          <div class="tags"><span>4PL / 5PL</span><span>interpolation</span><span>dilution</span><span>LOD / LOQ</span><span>recovery</span></div>
+          <figcaption><span class="figlabel">Fig. 9 |</span> IL-6 ELISA with unknown serum samples.</figcaption>
+        </figure>
+        <figure class="card">
+          <div class="imgs"><img src="docs/img/g-curvefit.png" alt="Michaelis-Menten fits for a wild-type and mutant enzyme with confidence bands." loading="lazy"></div>
+          <h3>Curve fitting</h3>
+          <p>Sixteen ready-made models, including Michaelis-Menten, binding, exponential decay with half-life, growth curves with doubling or lag time and Boltzmann, or type your own equation. Reports parameters with 95% CIs, R², AICc, residuals, and tests whether curves differ with an extra sum-of-squares F test.</p>
+          <div class="tags"><span>Michaelis-Menten</span><span>half-life</span><span>growth</span><span>custom equation</span><span>F test</span></div>
+          <figcaption><span class="figlabel">Fig. 10 |</span> Enzyme kinetics: the mutant's Km differs (p < 0.0001).</figcaption>
+        </figure>
+        <figure class="card">
+          <div class="imgs"><img src="docs/img/g-contingency.png" alt="Stacked percentage bars of tumor incidence on two diets." loading="lazy"></div>
+          <h3>Counts &amp; proportions</h3>
+          <p>How many responded, got sick or survived in each group. Fisher's exact or chi-square test, Cramér's V, and for 2 × 2 tables the odds ratio, relative risk and risk difference with confidence intervals.</p>
+          <div class="tags"><span>Fisher's exact</span><span>chi-square</span><span>odds ratio</span><span>relative risk</span></div>
+          <figcaption><span class="figlabel">Fig. 11 |</span> Tumor incidence on standard and high-fat diets.</figcaption>
+        </figure>
+        <figure class="card">
+          <div class="imgs"><img src="docs/img/g-power.png" alt="Power curves against sample size for three effect sizes." loading="lazy"></div>
+          <h3>Sample size &amp; power</h3>
+          <p>How many animals or patients you need, the power of a planned study, or the smallest effect it can detect. Two groups, paired, ANOVA, proportions or correlations, with dropout, and a justification paragraph ready for ethics protocols and grants.</p>
+          <div class="tags"><span>a priori n</span><span>power curves</span><span>dropout</span><span>IACUC / ethics</span></div>
+          <figcaption><span class="figlabel">Fig. 12 |</span> Ten per group detect a 20 mg/dL difference (SD 15) with 80% power.</figcaption>
+        </figure>
       </div>
+      <figure class="card board-card" style="margin-top:24px">
+        <div class="imgs"><img src="docs/img/g-board.png" alt="A four-panel figure lettered A to D combining a raincloud plot, a two-way ANOVA, dose-response curves and qPCR fold changes." loading="lazy"></div>
+        <h3>Figure board: multi-panel figures</h3>
+        <p>Press <b>+ Board</b> on any figure to collect it. Panels from different analyses and datasets are laid out at journal widths (89, 140 or 183 mm), lettered A, B, C and exported as one PNG, TIFF, PDF or editable SVG. Every panel keeps its own data and style and can be reopened and edited later.</p>
+        <figcaption><span class="figlabel">Fig. 13 |</span> Four analyses, one figure, made entirely in Serpentine.</figcaption>
+      </figure>
     </div>
   </section>
 
@@ -487,6 +535,13 @@ footer .sp { margin-left: auto; }
                 <tr><td>Does one measure track another?</td><td>Correlation &amp; regression.</td></tr>
                 <tr><td>How potent is this compound?</td><td>Dose-response curve.</td></tr>
                 <tr><td>How long until death, relapse or another event?</td><td>Survival curve. One row per subject with its time, whether the event happened (1) or it was censored (0), and its group.</td></tr>
+                <tr><td>Do two factors, like genotype and treatment, interact?</td><td>Two-way ANOVA. One row per value with both factors, or a Prism-style grouped table.</td></tr>
+                <tr><td>Did more animals respond in one group?</td><td>Counts &amp; proportions. A table of counts, or one row per subject.</td></tr>
+                <tr><td>What is the Km, half-life or doubling time?</td><td>Curve fitting. Pick a model or type your own equation.</td></tr>
+                <tr><td>What concentration is in my samples?</td><td>Standard curve. Standards with known concentrations, unknowns with the concentration left empty.</td></tr>
+                <tr><td>Did gene expression change?</td><td>qPCR gene expression. The Ct export from your instrument.</td></tr>
+                <tr><td>How many subjects do I need?</td><td>Sample size &amp; power. No data needed.</td></tr>
+                <tr><td>Not sure?</td><td>Press <b>Help me choose</b> above the analysis list.</td></tr>
               </tbody>
             </table></div>
           </article>
@@ -617,9 +672,9 @@ M2      KO         29.4
         <details><summary>Is it free?</summary><p>Yes. Serpentine is free to use, online or downloaded.</p></details>
         <details><summary>Can I trust the statistics?</summary><p>Serpentine uses SciPy, the standard open scientific library behind much of published research, for every test, and it reports exactly which test was used. You can also download the Python script and check every step. As with any software, choose an analysis that matches your experimental design.</p></details>
         <details><summary>Will my figures look like everyone else's?</summary><p>Only if you want them to. Every visual property is a setting, from fonts and axis lines to per-group markers and hatch patterns, and the optional Python box lets you do anything matplotlib can. Save your look as a style so your figures stay recognisably yours.</p></details>
-        <details><summary>Does it replace GraphPad Prism?</summary><p>For the analyses it covers, it can. Serpentine focuses on things Prism handles less well: event-aligned recordings, fully customizable modern plot types such as raincloud and beeswarm plots, reproducible scripts and keeping data local. Prism still covers many more analyses today.</p></details>
+        <details><summary>Does it replace GraphPad Prism?</summary><p>For the analyses it covers, it can. Serpentine focuses on things Prism handles less well: event-aligned recordings, fully customizable modern plot types such as raincloud and beeswarm plots, reproducible scripts and keeping data local. With eleven analyses, including two-way ANOVA, nonlinear curve fitting, standard curves and qPCR, it now covers what most labs use day to day; Prism still has more specialized analyses.</p></details>
         <details><summary>How do I cite Serpentine?</summary><p>The methods text names Serpentine and the versions of Python, NumPy, SciPy, pandas and matplotlib used. Cite the software by name and link to <a href="https://github.com/Frizzell-5/Serpentine">github.com/Frizzell-5/Serpentine</a>.</p></details>
-        <details><summary>Can I suggest a feature or report a bug?</summary><p>Yes. Open an issue on <a href="https://github.com/Frizzell-5/Serpentine/issues">GitHub</a>. Multi-panel figures, survival curves, two-way ANOVA and direct LabChart file import are already on the roadmap.</p></details>
+        <details><summary>Can I suggest a feature or report a bug?</summary><p>Yes. Open an issue on <a href="https://github.com/Frizzell-5/Serpentine/issues">GitHub</a>. Repeated-measures two-way ANOVA, axis breaks and direct LabChart file import are on the roadmap.</p></details>
       </div>
     </div>
   </section>
@@ -637,7 +692,7 @@ M2      KO         29.4
 
 <footer>
   <div class="wrap">
-    <span><b style="color:var(--ink)">Serpentine</b> v0.7 · Made by Shadan Alrawi</span>
+    <span><b style="color:var(--ink)">Serpentine</b> v0.8 · Made by Shadan Alrawi</span>
     <a href="https://github.com/Frizzell-5/Serpentine">GitHub</a>
     <a href="https://github.com/Frizzell-5/Serpentine/issues">Report an issue</a>
     <span class="sp">Built on Pyodide, NumPy, SciPy, pandas and matplotlib.</span>

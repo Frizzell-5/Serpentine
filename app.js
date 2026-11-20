@@ -108,7 +108,7 @@ function armConfirm(btn, question, action) {
 // Defaults
 // ============================================================================
 const DEFAULT_SETTINGS = {
-  compare: { dataset: "", layout: "wide", columns: [], value_col: "", group_col: "", group_order: "", y_name: "", normalize: "none", combine_headings: true, paired: false, test: "auto", equal_var: false, posthoc: "all" },
+  compare: { dataset: "", layout: "wide", columns: [], value_col: "", group_col: "", group_order: "", y_name: "", normalize: "none", combine_headings: true, paired: false, test: "auto", equal_var: false, posthoc: "all", outliers: "keep", outlier_method: "grubbs" },
   timecourse: {
     time_col: "", time_unit: "seconds", value_col: "", valid_min: "", valid_max: "", filter_col: "", filter_min: "", filter_max: "",
     bin: 30, baseline_start: -5, baseline_end: 0, window_start: -10, window_end: 30, event_label: "Injection", norm: "pct",
@@ -118,6 +118,31 @@ const DEFAULT_SETTINGS = {
   correlation: { dataset: "", x_col: "", y_col: "", group_col: "", group_order: "", method: "pearson", fit: true, ci: true, annotate: true },
   dose: { dataset: "", x_col: "", x_unit: "", x_scale: 1, mode: "curves", y_cols: [], curve_name: "Response", fix_bottom: "", fix_top: "", show_ec50: true, all_points: false, ec_label: "" },
   survival: { dataset: "", time_col: "", event_col: "", group_col: "", group_order: "", time_unit: "", y_scale: "pct", show_ci: true, show_censors: true, show_median: false, at_risk: false },
+  twoway: { dataset: "", layout: "long", a_col: "", b_col: "", value_col: "", row_col: "", a_order: "", b_order: "", a_name: "", b_name: "", y_name: "", transform: "none", posthoc: "within_a" },
+  qpcr: { dataset: "", layout: "long", sample_col: "", group_col: "", gene_col: "", ct_col: "", gene_cols: [], ref_genes: [], targets: [], control_group: "", group_order: "", efficiency: "", output: "fold", test: "param", equal_var: false, posthoc: "control", max_ct: 35, rep_sd: 0.5 },
+  stdcurve: { dataset: "", conc_col: "", signal_cols: [], name_col: "", dilution_col: "", dilution: 1, unit: "", model: "4pl", weight: "none", blank: "none", show_unknowns: true, guides: true, annotate: true, x_name: "", y_name: "" },
+  curvefit: { dataset: "", layout: "wide", x_col: "", y_cols: [], y_col: "", group_col: "", group_order: "", mode: "curves", curve_name: "Data", model: "mm", equation: "", initial: "", weight: "none", band: false, residuals: false, compare: "", all_points: false, extend: 0, annotate: true, x_name: "", y_name: "" },
+  contingency: { dataset: "", layout: "counts", row_col: "", col_col: "", count_cols: [], row_order: "", col_order: "", test: "auto", yates: false, display: "stacked_pct", labels: true, annotate: true },
+  power: { design: "two", entry: "raw", solve: "n", mean1: 100, mean2: 80, sd: 15, effect: 0.8, means: "10, 12, 15", k: 3, p1: 0.3, p2: 0.1, r: 0.5, unit: "", alpha: 0.05, power: 0.8, sides: "two", ratio: 1, dropout: 0, n: 10 },
+};
+// Analyses that need no data table (they run from the numbers in Settings).
+const NO_DATA = new Set(["power"]);
+// Analyses drawn as one category per group (plot type, significance marks), and as lines/curves.
+const GROUP_PLOTS = new Set(["compare", "timecourse", "twoway", "qpcr"]);
+const LINE_PLOTS = new Set(["timecourse", "dose", "correlation", "survival", "curvefit", "stdcurve", "power"]);
+const LEGEND_PLOTS = new Set([...LINE_PLOTS, "twoway", "qpcr", "contingency"]);
+// Parameter names of each curve-fit model (mirrors FIT_MODELS in the engine).
+const FIT_MODELS = [
+  ["Enzymes & binding", [["mm", "Michaelis-Menten (Vmax, Km)"], ["hill", "Specific binding with Hill slope"], ["one_site", "One site, total binding"]]],
+  ["Exponential", [["exp_decay", "One-phase decay (half-life)"], ["exp_assoc", "One-phase association"], ["exp2_decay", "Two-phase decay"], ["exp_growth", "Exponential growth (doubling time)"]]],
+  ["Growth & sigmoid", [["logistic", "Logistic growth"], ["gompertz", "Gompertz growth (lag time)"], ["boltzmann", "Boltzmann sigmoid (V50)"]]],
+  ["Other", [["gaussian", "Gaussian peak"], ["power", "Power law"], ["linear", "Straight line"], ["poly2", "Quadratic"], ["poly3", "Cubic"], ["custom", "Your own equation…"]]],
+];
+const FIT_PARAMS = {
+  mm: ["Vmax", "Km"], hill: ["Bmax", "Kd", "h"], one_site: ["Bmax", "Kd", "NS"], exp_decay: ["Y0", "Plateau", "K"], exp_assoc: ["Y0", "Plateau", "K"],
+  exp2_decay: ["Plateau", "SpanFast", "Kfast", "SpanSlow", "Kslow"], exp_growth: ["Y0", "K"], logistic: ["Y0", "K", "r"], gompertz: ["Y0", "A", "mu", "lag"],
+  boltzmann: ["Bottom", "Top", "V50", "Slope"], gaussian: ["Baseline", "Amplitude", "Mean", "SD"], power: ["A", "B"], linear: ["Intercept", "Slope"],
+  poly2: ["B0", "B1", "B2"], poly3: ["B0", "B1", "B2", "B3"], custom: [],
 };
 
 // Everything about the look of a figure. Quick styles reset these and nothing else.
@@ -249,10 +274,60 @@ const ANALYSES = [
     icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45M4 37V3"/><path d="M6 6h9v6h7v7h6v6h9v5h9" stroke-linejoin="round"/><path d="M18 9v6M33 22v6" stroke-width="1.5"/></svg>' },
   { id: "dose", title: "Dose-response curve", desc: "Concentration series fitted with a 4-parameter logistic model. EC50 or IC50 with confidence intervals.",
     icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45M4 37V3"/><path d="M6 8c10 0 13 1 18 12s9 12 22 12" stroke-linejoin="round"/><path d="M24 20v17" stroke-dasharray="2.5 2.5" stroke-width="1.4"/></svg>' },
+  { id: "twoway", title: "Two-way ANOVA", desc: "Two factors at once, like genotype × treatment. Main effects, interaction and Šidák or Tukey comparisons on a grouped plot.",
+    icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45"/><rect x="7" y="12" width="7" height="25" rx="1" fill="currentColor" fill-opacity=".18"/><rect x="15" y="18" width="7" height="19" rx="1" fill="currentColor" fill-opacity=".45"/><rect x="29" y="24" width="7" height="13" rx="1" fill="currentColor" fill-opacity=".18"/><rect x="37" y="9" width="7" height="28" rx="1" fill="currentColor" fill-opacity=".45"/></svg>' },
+  { id: "contingency", title: "Counts & proportions", desc: "How many responded, survived or got sick in each group. Chi-square or Fisher's exact test, odds ratio and relative risk.",
+    icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45"/><rect x="10" y="5" width="11" height="32" rx="1"/><rect x="10" y="26" width="11" height="11" fill="currentColor" fill-opacity=".45"/><rect x="30" y="5" width="11" height="32" rx="1"/><rect x="30" y="15" width="11" height="22" fill="currentColor" fill-opacity=".45"/></svg>' },
+  { id: "curvefit", title: "Curve fitting", desc: "Michaelis-Menten, exponential decay, growth curves, binding, Boltzmann or your own equation. Compare curves with an F test.",
+    icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45M4 37V3"/><path d="M6 34C12 14 18 9 46 7" stroke-linejoin="round"/><g fill="currentColor" stroke="none"><circle cx="9" cy="27" r="2.3"/><circle cx="14" cy="18" r="2.3"/><circle cx="21" cy="13" r="2.3"/><circle cx="31" cy="9" r="2.3"/><circle cx="42" cy="8" r="2.3"/></g></svg>' },
+  { id: "stdcurve", title: "Standard curve", desc: "ELISA, BCA, Bradford or any assay: fit the standards and read off unknown concentrations, with dilutions, LOD and QC flags.",
+    icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45M4 37V3"/><path d="M6 33c12-1 16-6 20-14s8-12 20-13" stroke-linejoin="round"/><path d="M4 19h22v18" stroke-dasharray="2.5 2.5" stroke-width="1.4"/><circle cx="26" cy="19" r="3" fill="none"/></svg>' },
+  { id: "qpcr", title: "qPCR gene expression", desc: "Ct values to fold change by 2^-ΔΔCt or Pfaffl. Reference genes, technical replicates and statistics on log2 fold change.",
+    icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45M4 37V3"/><path d="M6 34c10 0 12-1 16-10s6-15 24-16" stroke-linejoin="round"/><path d="M6 34c14 0 18-1 22-8s7-11 18-12" stroke-linejoin="round" stroke-dasharray="3 2.5"/><path d="M4 22h45" stroke-width="1" stroke-dasharray="1.5 2"/></svg>' },
+  { id: "power", title: "Sample size & power", desc: "How many animals, patients or samples do you need? Power curves and a ready-to-paste justification for protocols and grants.",
+    icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45M4 37V3"/><path d="M6 33c6-16 12-24 22-26s14-1 18-1" stroke-linejoin="round"/><path d="M4 12h45" stroke-width="1" stroke-dasharray="2 2"/><path d="M18 12v25" stroke-width="1.4" stroke-dasharray="2.5 2.5"/><circle cx="18" cy="12" r="2.6" fill="currentColor"/></svg>' },
 ];
+const ANALYSIS_GROUPS = [
+  ["Compare", ["compare", "twoway", "contingency"]],
+  ["Over time", ["timecourse", "survival"]],
+  ["Curves & relationships", ["correlation", "curvefit", "dose"]],
+  ["Assays", ["stdcurve", "qpcr"]],
+  ["Plan", ["power"]],
+];
+// "Help me choose": a short decision tree that ends at an analysis.
+const CHOOSER = {
+  start: { q: "What do you want to find out?", o: [
+    ["Whether groups are different", "Control vs treated, wild type vs knockout", "groups"],
+    ["How something changes over time", "After an injection, survival, growth", "time"],
+    ["How two things are related", "Correlation, curve fitting, EC50", "relate"],
+    ["The concentration of my samples", "ELISA, BCA, Bradford, any standard curve", "=stdcurve"],
+    ["Gene expression from qPCR", "Ct values to fold change", "=qpcr"],
+    ["How many subjects I need", "For a protocol, grant or study plan", "=power"],
+  ] },
+  groups: { q: "What did you measure in each subject?", o: [
+    ["A number", "Weight, volume, concentration, a score", "factors"],
+    ["A yes/no or a category", "Responded or not, tumor or no tumor, cell type", "=contingency"],
+  ] },
+  factors: { q: "How many things did you vary?", o: [
+    ["One", "Several doses, or control vs treated", "=compare"],
+    ["Two at once", "Genotype × treatment, sex × diet", "=twoway"],
+  ] },
+  time: { q: "Which describes your data?", o: [
+    ["Recordings around an event", "Heart rate before and after an injection", "=timecourse"],
+    ["Time until something happens", "Death, relapse, a seizure", "=survival"],
+    ["A growth or decay curve", "Bacterial growth, drug clearance, half-life", "=curvefit"],
+  ] },
+  relate: { q: "Which describes your data?", o: [
+    ["Two measurements per subject", "Does weight track glucose?", "=correlation"],
+    ["A concentration series", "EC50 or IC50 of a drug", "=dose"],
+    ["A known equation", "Michaelis-Menten, binding, Boltzmann, your own", "=curvefit"],
+  ] },
+};
 
+const BOARD_DEFAULTS = { panels: [], cols: 2, width: 7.2, letters: "A", letter_size: 14, gap: 0.15, dpi: 300 };
 function freshState() {
   return {
+    board: clone(BOARD_DEFAULTS),
     app: "Serpentine",
     version: 2,
     name: "Untitled analysis",
@@ -277,7 +352,7 @@ const openSections = store(SECTIONS_KEY) || {};
 // Python engine (web worker)
 // ============================================================================
 const servedFromDisk = location.protocol === "file:";
-const worker = servedFromDisk ? null : new Worker("worker.js?v=0.7.0");
+const worker = servedFromDisk ? null : new Worker("worker.js?v=0.8.0");
 let engineReady = false;
 let reqId = 0;
 const pending = new Map();
@@ -395,7 +470,7 @@ async function runNow() {
     rerun = true;
     return;
   }
-  if (!state.datasets.some((d) => d.text.trim())) {
+  if (!NO_DATA.has(state.analysis) && !state.datasets.some((d) => d.text.trim())) {
     renderEmptyStage();
     return;
   }
@@ -453,60 +528,158 @@ function adopt(obj) {
     version: 2,
     settings: Object.fromEntries(Object.keys(DEFAULT_SETTINGS).map((k) => [k, { ...DEFAULT_SETTINGS[k], ...(obj.settings?.[k] || {}) }])),
     style,
+    board: { ...BOARD_DEFAULTS, ...(obj.board || state.board || {}) },
   };
+  if (!Array.isArray(state.board.panels)) state.board.panels = [];
+  if (!ANALYSES.some((a) => a.id === state.analysis)) state.analysis = "compare";
   state.datasets = state.datasets.map((d) => ({ id: d.id || uid(), name: d.name || "Table", text: d.text || "", meta: { group: "", subject: "", event: "", exclude: "", ...(d.meta || {}) } }));
   if (!state.datasets.some((d) => d.id === state.active)) state.active = state.datasets[0]?.id || null;
   return true;
 }
 
-// Undo history covers analysis choices, settings and style (not the data tables).
+// Undo history covers everything you do: analysis, settings, style, data tables, session details,
+// examples and the figure board. Table text is shared by reference between steps, so it stays cheap.
 const history = { past: [], future: [], timer: null, last: null };
 function snapshot() {
-  return JSON.stringify({ analysis: state.analysis, settings: state.settings, style: state.style });
+  const { panels, ...boardOpts } = state.board;
+  return {
+    light: JSON.stringify({ analysis: state.analysis, settings: state.settings, style: state.style, name: state.name, example: state.example, active: state.active, board: boardOpts }),
+    datasets: state.datasets.map((d) => ({ id: d.id, name: d.name, text: d.text, meta: { ...d.meta } })),
+    panels: panels.slice(),
+  };
+}
+function sameSnap(a, b) {
+  if (!a || !b || a.light !== b.light || a.datasets.length !== b.datasets.length || a.panels.length !== b.panels.length) return false;
+  for (let i = 0; i < a.datasets.length; i++) {
+    const x = a.datasets[i], y = b.datasets[i];
+    if (x.id !== y.id || x.name !== y.name || x.text !== y.text || JSON.stringify(x.meta) !== JSON.stringify(y.meta)) return false;
+  }
+  return a.panels.every((p, i) => p === b.panels[i]);
+}
+const KEY_NAMES = { plot_kind: "plot type", ymin: "Y min", ymax: "Y max", xmin: "X min", xmax: "X max", logy: "log scale", logx: "log X", xrot: "label angle", dpi: "resolution",
+  custom_rc: "matplotlib settings", custom_code: "Python code", posthoc: "comparisons", y_name: "measurement name", ref_lines: "reference lines", panel_label: "panel letter" };
+const keyName = (k) => KEY_NAMES[k] || k.replace(/_/g, " ");
+function changedKeys(a, b) {
+  return [...new Set([...Object.keys(a || {}), ...Object.keys(b || {})])].filter((k) => JSON.stringify(a?.[k]) !== JSON.stringify(b?.[k]));
+}
+// A short description of what changed between two snapshots, e.g. "palette, font size" or "deleted a table".
+function describeChange(a, b) {
+  const A = JSON.parse(a.light), B = JSON.parse(b.light);
+  const parts = [];
+  if (A.analysis !== B.analysis) parts.push("switched to " + (ANALYSES.find((x) => x.id === B.analysis)?.title || B.analysis).toLowerCase());
+  if (A.example !== B.example && B.example) parts.push("loaded an example");
+  else if (a.datasets.length < b.datasets.length) parts.push(b.datasets.length - a.datasets.length > 1 ? "added tables" : "added a table");
+  else if (a.datasets.length > b.datasets.length) parts.push(a.datasets.length - b.datasets.length > 1 ? "deleted tables" : "deleted a table");
+  else {
+    if (a.datasets.some((d, i) => d.text !== b.datasets[i].text)) parts.push("edited data");
+    if (a.datasets.some((d, i) => d.name !== b.datasets[i].name)) parts.push("renamed a table");
+    if (a.datasets.some((d, i) => JSON.stringify(d.meta) !== JSON.stringify(b.datasets[i].meta))) parts.push("session details");
+  }
+  if (a.panels.length < b.panels.length) parts.push("added to the board");
+  else if (a.panels.length > b.panels.length) parts.push("removed from the board");
+  else if (a.panels.some((p, i) => p !== b.panels[i])) parts.push(a.panels.every((p) => b.panels.includes(p)) ? "rearranged the board" : "updated a board panel");
+  if (JSON.stringify(A.board) !== JSON.stringify(B.board)) parts.push("board layout");
+  if (A.analysis === B.analysis) {
+    const sk = changedKeys(A.settings[B.analysis], B.settings[B.analysis]);
+    if (sk.length && !(A.example !== B.example)) parts.push(...sk.slice(0, 3).map(keyName));
+  }
+  const st = changedKeys(A.style, B.style);
+  if (st.length > 6) parts.push("figure style (many settings)");
+  else parts.push(...st.map((k) => (k === "groups" ? "group colors and names" : keyName(k))));
+  if (A.name !== B.name && !parts.length) parts.push("project name");
+  const out = [...new Set(parts)];
+  return out.length ? out.slice(0, 3).join(", ") + (out.length > 3 ? "…" : "") : "change";
+}
+function commitHistory() {
+  const now = snapshot();
+  if (history.last !== null && !sameSnap(now, history.last)) {
+    history.past.push({ snap: history.last, label: describeChange(history.last, now) });
+    if (history.past.length > 200) history.past.shift();
+    history.future = [];
+  }
+  history.last = now;
+  renderUndo();
 }
 function recordHistory() {
   clearTimeout(history.timer);
-  history.timer = setTimeout(() => {
-    const now = snapshot();
-    if (history.last !== null && now !== history.last) {
-      history.past.push(history.last);
-      if (history.past.length > 200) history.past.shift();
-      history.future = [];
-    }
-    history.last = now;
-    renderUndo();
-  }, 450);
+  history.timer = setTimeout(commitHistory, 450);
 }
-function applySnapshot(json) {
-  const s = JSON.parse(json);
+function applySnapshot(snap) {
+  const s = JSON.parse(snap.light);
   state.analysis = s.analysis;
   state.settings = s.settings;
   state.style = s.style;
-  history.last = json;
-  renderPanels();
-  renderUndo();
+  state.name = s.name;
+  state.example = s.example;
+  state.board = { ...s.board, panels: snap.panels.slice() };
+  const oldText = Object.fromEntries(state.datasets.map((d) => [d.id, d.text]));
+  state.datasets = snap.datasets.map((d) => ({ ...d, meta: { ...d.meta } }));
+  state.active = state.datasets.some((d) => d.id === s.active) ? s.active : state.datasets[0]?.id || null;
+  for (const d of state.datasets) if (oldText[d.id] !== d.text || !inspected[d.id]) { delete inspected[d.id]; scheduleInspect(d.id, 10); }
+  history.last = snapshot();
+  renderAll();
+  renderBoardCount();
+  if (!$("#board").hidden) renderBoard();
   autosave();
   scheduleRun(10);
 }
 function undo() {
   clearTimeout(history.timer);
-  const now = snapshot();
-  if (history.last !== null && now !== history.last) history.past.push(history.last);
-  if (!history.past.length) return;
-  history.future.push(now);
-  applySnapshot(history.past.pop());
+  commitHistory(); // anything still waiting to be recorded becomes its own step first
+  if (!history.past.length) return toast("Nothing to undo");
+  const step = history.past.pop();
+  history.future.push({ snap: history.last, label: step.label });
+  applySnapshot(step.snap);
+  toast("Undid: " + step.label);
 }
 function redo() {
-  if (!history.future.length) return;
-  history.past.push(snapshot());
-  applySnapshot(history.future.pop());
+  clearTimeout(history.timer);
+  commitHistory();
+  if (!history.future.length) return toast("Nothing to redo");
+  const step = history.future.pop();
+  history.past.push({ snap: history.last, label: step.label });
+  applySnapshot(step.snap);
+  toast("Redid: " + step.label);
+}
+// Jump several steps at once from the history list
+function jumpHistory(k) {
+  clearTimeout(history.timer);
+  commitHistory();
+  if (k <= 0 || k > history.past.length) return;
+  let label = "";
+  for (let i = 0; i < k; i++) {
+    const step = history.past.pop();
+    history.future.push({ snap: history.last, label: step.label });
+    history.last = step.snap;
+    label = step.label;
+  }
+  applySnapshot(history.last);
+  toast(`Went back ${k} step${k > 1 ? "s" : ""}, to before: ${label}`);
 }
 function renderUndo() {
-  $("#btn-undo").disabled = !history.past.length && snapshot() === history.last;
-  $("#btn-redo").disabled = !history.future.length;
+  const pending = history.last && !sameSnap(snapshot(), history.last);
+  const u = $("#btn-undo"), r = $("#btn-redo");
+  u.disabled = !history.past.length && !pending;
+  r.disabled = !history.future.length;
+  const lastLabel = history.past.length ? history.past[history.past.length - 1].label : "";
+  u.title = (lastLabel ? "Undo: " + lastLabel : "Undo") + " (" + KEYS.mod + "Z)";
+  r.title = (history.future.length ? "Redo: " + history.future[history.future.length - 1].label : "Redo") + " (" + KEYS.redo + ")";
+  $("#btn-history").disabled = !history.past.length && !history.future.length;
+}
+function renderHistoryMenu() {
+  const m = $("#history-menu");
+  const past = history.past.slice(-15).map((s, i, arr) => ({ label: s.label, k: arr.length - i })).reverse();
+  const fut = history.future.slice(-5).map((s) => s.label);
+  m.innerHTML = `<div class="hm-title">History</div>
+    ${fut.length ? fut.map((l) => `<div class="hm-item hm-future" title="Use Redo to bring this back">${esc(l)}</div>`).join("") : ""}
+    <div class="hm-item hm-now">Now</div>
+    ${past.map((p) => `<button type="button" class="hm-item" data-jump="${p.k}"><span>${esc(p.label)}</span><small>undo ${p.k}</small></button>`).join("") || '<div class="hm-empty">No changes yet</div>'}
+    ${history.past.length > 15 ? `<div class="hm-empty">${history.past.length - 15} older step(s)</div>` : ""}`;
 }
 
-const COLUMN_KEYS = ["dataset", "columns", "value_col", "group_col", "group_order", "y_name", "time_col", "event_col", "filter_col", "filter_min", "filter_max", "x_col", "y_col", "y_cols", "curve_name", "x_unit"];
+const COLUMN_KEYS = ["dataset", "columns", "value_col", "group_col", "group_order", "y_name", "time_col", "event_col", "filter_col", "filter_min", "filter_max", "x_col", "y_col", "y_cols", "curve_name", "x_unit",
+  "a_col", "b_col", "row_col", "a_order", "b_order", "a_name", "b_name", "sample_col", "gene_col", "ct_col", "gene_cols", "ref_genes", "targets", "control_group",
+  "conc_col", "signal_cols", "name_col", "dilution_col", "dilution", "unit", "x_name", "col_col", "count_cols", "row_order", "col_order", "compare"];
 function forgetExampleColumns() {
   // The example's column names and group colours mean nothing for the user's own table.
   for (const [kind, defaults] of Object.entries(DEFAULT_SETTINGS)) {
@@ -936,6 +1109,9 @@ const SETTINGS_SCHEMA = {
       sel("test", "Test", TEST_OPTIONS),
       !(s.paired && s.layout !== "long") && s.test !== "nonparam" && tog("equal_var", "Assume equal variances", "Off applies Welch's correction (recommended)."),
       sel("posthoc", "Multiple comparisons", POSTHOC_OPTIONS, { hint: "Used when there are 3 or more groups." }),
+      sec("Outliers"),
+      sel("outliers", "Possible outliers", [["keep", "Don't check"], ["flag", "Find and list them"], ["remove", "Find and remove them"]], { hint: "Removing outliers should be decided before looking at the results, and reported." }),
+      s.outliers !== "keep" && sel("outlier_method", "Method", [["grubbs", "Grubbs' test (alpha 0.05, assumes normal data)"], ["iqr", "Tukey's fences (beyond 1.5 × IQR)"]]),
     ];
   },
   timecourse: (s) => {
@@ -1024,14 +1200,169 @@ const SETTINGS_SCHEMA = {
       tog("at_risk", "Show the number at risk under the plot"),
     ];
   },
+  twoway: (s) => {
+    const c = columnsFor(s.dataset);
+    return [
+      sec("Data"),
+      datasetField(),
+      seg("layout", "Table layout", [["long", "One row per value"], ["grouped", "Prism-style grouped"]]),
+      s.layout === "grouped"
+        ? note("First column: the row factor (e.g. Genotype). Other columns: the column factor (e.g. Vehicle, Drug), with replicates in repeated columns such as Drug 1, Drug 2.")
+        : note("Three columns: the first factor, the second factor and the measurement."),
+      s.layout !== "grouped" && row(col("a_col", "First factor (x-axis)", c.all), col("b_col", "Second factor (colors)", c.all)),
+      s.layout !== "grouped" && col("value_col", "Measurement", c.numeric),
+      s.layout === "grouped" && col("row_col", "Row labels column", c.all),
+      row(txt("a_order", "First factor order", { placeholder: "e.g. WT, KO" }), txt("b_order", "Second factor order", { placeholder: "e.g. Vehicle, Drug" })),
+      row(txt("a_name", "First factor name", { placeholder: "automatic" }), txt("b_name", "Second factor name", { placeholder: "automatic" })),
+      txt("y_name", "Measurement name", { placeholder: "e.g. Grip strength (g)" }),
+      sec("Statistics"),
+      sel("transform", "Transform values first", [["none", "No transform"], ["log10", "log10 (for skewed, positive data)"], ["log2", "log2"], ["sqrt", "Square root (counts)"]]),
+      sel("posthoc", "Multiple comparisons", [["within_a", "Second factor within each level of the first (Šidák)"], ["within_b", "First factor within each level of the second (Šidák)"], ["all", "Every combination (Tukey)"], ["none", "None"]]),
+      note("Type III sums of squares, so unequal group sizes are handled."),
+    ];
+  },
+  qpcr: (s) => {
+    const c = columnsFor(s.dataset);
+    const meta = lastResult?.meta?.qpcr || {};
+    const genes = meta.genes || [];
+    const groups = meta.groups || [];
+    return [
+      sec("Data"),
+      datasetField(),
+      seg("layout", "Table layout", [["long", "One row per well"], ["wide", "One column per gene"]]),
+      s.layout === "long"
+        ? note("Columns for sample, gene (target) and Ct, as exported by QuantStudio, CFX, LightCycler and most instruments. A group column is optional.")
+        : note("One row per sample (or well), a column for the sample and one Ct column per gene."),
+      s.layout === "long" && row(col("sample_col", "Sample column", c.all), col("gene_col", "Gene / target column", c.all)),
+      s.layout === "long" && col("ct_col", "Ct / Cq column", c.numeric),
+      s.layout === "wide" && col("sample_col", "Sample column", c.all),
+      s.layout === "wide" && cols("gene_cols", "Ct columns (genes)", c.numeric, "Leave all unchecked to use every numeric column."),
+      sel("group_col", "Group column", [["", "Automatic"], ["__none__", "None (from sample names)"]].concat(c.all.map((n) => [n, n])), { hint: "Without one, “Treated 3” and “Treated 4” become group Treated." }),
+      sec("Genes and groups"),
+      genes.length ? cols("ref_genes", "Reference (housekeeping) genes", genes, "Leave unchecked to pick GAPDH, ACTB, 18S and similar automatically. Two or more are averaged (geometric mean).") : note("Gene choices appear after the first run."),
+      genes.length > 2 && cols("targets", "Target genes to show", genes, "Leave unchecked to show every non-reference gene."),
+      groups.length ? sel("control_group", "Control group (fold change = 1)", [["", "First group"]].concat(groups.map((g) => [g, g]))) : null,
+      txt("group_order", "Group order", { placeholder: "e.g. Untreated, Treated" }),
+      txt("efficiency", "Primer efficiencies", { placeholder: "e.g. GAPDH = 98%, IL6 = 1.93", hint: "Optional. Leave empty for 100% (2^-ΔΔCt); with values the Pfaffl method is used." }),
+      sec("Output and statistics"),
+      sel("output", "Show as", [["fold", "Fold change (2^-ΔΔCt)"], ["log2", "log2 fold change"], ["dct", "Relative expression (2^-ΔCt)"]]),
+      sel("test", "Test (on log2 fold change)", TEST_OPTIONS),
+      sel("posthoc", "Multiple comparisons", [["control", "Each group vs the control"], ["all", "Every pair of groups"]]),
+      row(num("max_ct", "Flag Ct above", { placeholder: "35" }), num("rep_sd", "Flag replicate SD above", { placeholder: "0.5" })),
+    ];
+  },
+  stdcurve: (s) => {
+    const c = columnsFor(s.dataset);
+    const xcol = s.conc_col || c.numeric[0];
+    return [
+      sec("Data"),
+      datasetField(),
+      note("One row per well or sample. Standards have a known concentration; leave the concentration empty for unknowns. A concentration of 0 is the blank."),
+      col("conc_col", "Concentration column", c.numeric),
+      cols("signal_cols", "Signal columns (replicates)", c.numeric.filter((n) => n !== xcol), "Absorbance, fluorescence, luminescence… Several columns are averaged as replicates. Leave unchecked to use all."),
+      row(col("name_col", "Sample names", c.all, { auto: "Automatic" }), txt("unit", "Unit", { placeholder: "e.g. pg/mL" })),
+      row(col("dilution_col", "Dilution column", c.numeric, { none: true }), num("dilution", "Or dilute all by", { placeholder: "1" })),
+      sec("Curve"),
+      sel("model", "Model", Object.entries({ "4pl": "4-parameter logistic (ELISA)", "5pl": "5-parameter logistic (asymmetric)", linear: "Straight line (BCA, Bradford)", linear0: "Straight line through zero", quadratic: "Quadratic", loglog: "Straight line on log-log axes" })),
+      sel("weight", "Weighting", [["none", "None"], ["1/y", "1/Y"], ["1/y2", "1/Y² (common for ELISA)"]]),
+      seg("blank", "Blank", [["none", "Keep as a standard"], ["subtract", "Subtract from everything"]]),
+      sec("Display"),
+      tog("show_unknowns", "Plot the unknowns on the curve"),
+      s.show_unknowns && tog("guides", "Dashed guide lines to the axes"),
+      tog("annotate", "Print R² on the plot"),
+      row(txt("x_name", "X-axis name", { placeholder: "e.g. IL-6" }), txt("y_name", "Y-axis name", { placeholder: "e.g. Absorbance (450 nm)" })),
+    ];
+  },
+  curvefit: (s) => {
+    const c = columnsFor(s.dataset);
+    const xcol = s.x_col || c.numeric[0];
+    let params = FIT_PARAMS[s.model] || [];
+    if (s.model === "custom") {
+      const fn = new Set(["exp", "log", "ln", "log10", "log2", "sqrt", "abs", "sin", "cos", "tan", "tanh", "arctan", "pi", "e", "power", "minimum", "maximum", "where", "X", "x", "Y", "y"]);
+      params = [...new Set((String(s.equation || "").replace(/^\s*y\s*=/i, "").match(/[A-Za-z_]\w*/g) || []).filter((w) => !fn.has(w)))];
+    }
+    return [
+      sec("Data"),
+      datasetField(),
+      seg("layout", "Table layout", [["wide", "X + one column per curve"], ["long", "X, Y and a group column"]]),
+      col("x_col", "X column", c.numeric),
+      s.layout === "long" && row(col("y_col", "Y column", c.numeric), col("group_col", "Group column", c.all, { none: true })),
+      s.layout !== "long" && seg("mode", "Y columns are", [["curves", "Separate curves"], ["replicates", "Replicates of one"]]),
+      s.layout !== "long" && cols("y_cols", "Y columns", c.numeric.filter((n) => n !== xcol), "Leave all unchecked to use every other numeric column."),
+      s.layout !== "long" && s.mode === "replicates" && txt("curve_name", "Curve name"),
+      sec("Model"),
+      sel("model", "Equation", FIT_MODELS),
+      s.model === "custom" && txt("equation", "Your equation", { placeholder: "Y = A*exp(-k*X) + C", hint: "Use X, any letters for parameters, and exp, log, sqrt, sin, ^ …" }),
+      s.model === "custom" && txt("initial", "Starting values", { placeholder: "A = 100, k = 0.1, C = 0", hint: "Optional, but helps hard fits converge. Unlisted parameters start at 1." }),
+      sel("weight", "Weighting", [["none", "None (ordinary least squares)"], ["1/y", "1/Y"], ["1/y2", "1/Y² (relative error)"]]),
+      sec("Compare and check"),
+      sel("compare", "Do the curves differ?", [["", "Don't test"], ["all", "Test the whole curve"]].concat(params.map((p) => [p, "Test " + p + " only"])), { hint: "Extra sum-of-squares F test. Needs two or more curves." }),
+      tog("residuals", "Show a residual plot", "Patterns in the residuals mean the model doesn't fit the shape."),
+      tog("band", "Shade the 95% confidence band"),
+      tog("all_points", "Show every replicate instead of mean ± error"),
+      tog("annotate", "Print R² on the plot", "Only with a single curve."),
+      num("extend", "Extend curves beyond the data", { placeholder: "0", hint: "As a fraction of the X range, e.g. 0.2" }),
+      row(txt("x_name", "X-axis name", { placeholder: "automatic" }), txt("y_name", "Y-axis name", { placeholder: "automatic" })),
+    ];
+  },
+  contingency: (s) => {
+    const c = columnsFor(s.dataset);
+    return [
+      sec("Data"),
+      datasetField(),
+      seg("layout", "Table layout", [["counts", "Table of counts"], ["raw", "One row per subject"]]),
+      s.layout === "counts"
+        ? note("One row per group, one column per outcome, counts in the cells. For example Diet | Tumor | No tumor.")
+        : note("Two category columns, one row per subject. For example Diet = High-fat, Outcome = Tumor."),
+      s.layout === "counts" && col("row_col", "Group names column", c.all, { auto: "First text column" }),
+      s.layout === "counts" && cols("count_cols", "Outcome columns", c.numeric, "Leave unchecked to use every numeric column."),
+      s.layout === "raw" && row(col("row_col", "Groups", c.all), col("col_col", "Outcome", c.all)),
+      row(txt("row_order", "Group order"), txt("col_order", "Outcome order")),
+      sec("Statistics"),
+      sel("test", "Test", [["auto", "Automatic (Fisher's exact for 2 × 2)"], ["fisher", "Fisher's exact test (2 × 2)"], ["chi2", "Chi-square test"]]),
+      s.test !== "fisher" && tog("yates", "Yates' continuity correction (2 × 2 chi-square)"),
+      note("For 2 × 2 tables you also get the odds ratio, relative risk and risk difference, with the first group and first outcome as the reference."),
+      sec("Display"),
+      seg("display", "Bars", [["stacked_pct", "Stacked %"], ["stacked", "Stacked counts"], ["grouped", "Side by side"]]),
+      s.display !== "grouped" && tog("labels", "Numbers inside the bars"),
+      tog("annotate", "Put the test result in the title"),
+    ];
+  },
+  power: (s) => {
+    const raw = s.entry !== "effect";
+    const d = s.design;
+    return [
+      note("No data needed. Fill in what you expect, and Serpentine works out the rest. Pilot data or published papers are the best source for these numbers."),
+      sec("Study design"),
+      sel("design", "Comparison", [["two", "Two independent groups (t-test)"], ["paired", "Before and after, same subjects (paired t-test)"], ["anova", "Three or more groups (one-way ANOVA)"], ["props", "Two proportions (e.g. % responders)"], ["corr", "A correlation"]]),
+      sel("solve", "Work out", [["n", "Sample size needed"], ["power", "Power for a given sample size"], ["effect", "Smallest effect I could detect"]]),
+      s.solve !== "n" && num("n", d === "corr" ? "Total sample size" : d === "paired" ? "Number of pairs" : "Sample size per group"),
+      sec("Expected effect"),
+      (d === "two" || d === "paired" || d === "anova") && seg("entry", "Describe it as", [["raw", "Means and SD"], ["effect", "Effect size"]]),
+      (d === "two" || d === "paired") && raw && row(num("mean1", "Control mean"), num("mean2", d === "paired" ? "Mean after" : "Treated mean")),
+      (d === "two" || d === "paired") && raw && row(num("sd", d === "paired" ? "SD of the differences" : "Standard deviation"), txt("unit", "Unit", { placeholder: "e.g. mg/dL" })),
+      (d === "two" || d === "paired") && !raw && num("effect", d === "paired" ? "Cohen's dz" : "Cohen's d", { hint: "0.2 small, 0.5 medium, 0.8 large" }),
+      d === "anova" && raw && row(txt("means", "Expected group means", { placeholder: "10, 12, 15" }), num("sd", "Standard deviation")),
+      d === "anova" && !raw && row(num("effect", "Cohen's f", { hint: "0.1 small, 0.25 medium, 0.4 large" }), num("k", "Number of groups")),
+      d === "props" && row(num("p1", "Control proportion", { placeholder: "0.30" }), num("p2", "Treated proportion", { placeholder: "0.10", hint: "0 to 1, or a percentage" })),
+      d === "corr" && num("r", "Expected correlation (r)", { placeholder: "0.5" }),
+      sec("Error rates"),
+      row(num("alpha", "Alpha (significance level)", { placeholder: "0.05" }), num("power", "Power", { placeholder: "0.8", hint: "0.8 or 0.9 are usual" })),
+      d !== "anova" && seg("sides", "Test", [["two", "Two-sided"], ["one", "One-sided"]]),
+      (d === "two" || d === "props") && num("ratio", "Group size ratio (treated / control)", { placeholder: "1" }),
+      s.solve === "n" && num("dropout", "Expected dropout (%)", { placeholder: "0", hint: "Adds subjects so enough complete the study." }),
+    ];
+  },
 };
 
 function styleSchema() {
   const s = state.style;
   const a = state.analysis;
-  const groupPlot = a === "compare" || a === "timecourse";
-  const lines = a === "timecourse" || a === "dose" || a === "correlation" || a === "survival";
-  const horizontal = groupPlot && s.orientation === "horizontal";
+  const groupPlot = GROUP_PLOTS.has(a);
+  const lines = LINE_PLOTS.has(a);
+  const bars = a === "contingency";
+  const legend = LEGEND_PLOTS.has(a);
+  const horizontal = (groupPlot || bars) && s.orientation === "horizontal";
   const mm = (v) => Math.round(parseFloat(v || 0) * 25.4);
   const dark = s.theme === "dark";
   return [
@@ -1039,7 +1370,11 @@ function styleSchema() {
     { type: "presets" },
     groupPlot && sec("Plot type"),
     groupPlot && { type: "chips", key: "plot_kind", label: a === "timecourse" ? "Endpoint plot" : "Plot", options: PLOT_KINDS },
-    groupPlot && seg("orientation", "Direction", [["vertical", "Vertical"], ["horizontal", "Horizontal"]]),
+    bars && sec("Bars"),
+    (groupPlot || bars) && seg("orientation", "Direction", [["vertical", "Vertical"], ["horizontal", "Horizontal"]]),
+    bars && row(num("bar_width", "Bar width", { placeholder: "0.62" }), num("edge_width", "Outline width", { placeholder: "auto" })),
+    bars && seg("fill", "Fill", [["light", "Light"], ["solid", "Solid"], ["outline", "Outline"]]),
+    bars && seg("bar_shape", "Bar corners", [["square", "Square"], ["rounded", "Rounded"]]),
     groupPlot && row(num("bar_width", "Bar / box width", { placeholder: "0.62", hint: "0.05 to 1" }), num("jitter", "Point spread", { placeholder: "0.12", hint: "0 = in a line" })),
     groupPlot && seg("fill", "Fill", [["light", "Light"], ["solid", "Solid"], ["outline", "Outline"]]),
     groupPlot && row(s.fill === "light" && num("fill_alpha", "Fill opacity", { placeholder: "0.25" }), num("edge_width", "Outline width", { placeholder: "auto" })),
@@ -1068,7 +1403,7 @@ function styleSchema() {
     row(num("cap_size", "Cap width", { placeholder: "auto", hint: "0 = no caps" }), num("error_width", "Error bar width", { placeholder: "auto" })),
     lines && tog("line_markers", "Markers on lines"),
     a === "timecourse" && row(num("band_alpha", "Band opacity", { placeholder: "0.18" }), num("trace_alpha", "Session line opacity", { placeholder: "0.35" })),
-    (a === "correlation" || a === "survival") && num("band_alpha", "Confidence band opacity", { placeholder: "0.18" }),
+    ["correlation", "survival", "curvefit"].includes(a) && num("band_alpha", "Confidence band opacity", { placeholder: "0.18" }),
     groupPlot && sec("Significance"),
     groupPlot && sel("sig", "Show results as", [["stars", "Stars (*, **, ***)"], ["p", "Exact p-values"], ["none", "Hide"]]),
     groupPlot && row(tog("show_ns", "Mark non-significant"), num("sig_size", "Text size", { placeholder: "auto" })),
@@ -1090,12 +1425,12 @@ function styleSchema() {
     row(num("offset_axes", "Offset axes (pt)", { placeholder: "0", hint: "Pulls axis lines away from the data" }), tog("trim_axes", "Trim axes to ticks")),
     seg("tick_dir", "Tick marks", [["out", "Outside"], ["in", "Inside"], ["inout", "Across"]]),
     row(num("tick_length", "Tick length", { placeholder: "3.5" }), tog("minor_ticks", "Minor ticks")),
-    groupPlot && tog("cat_ticks", "Tick marks on the group axis"),
-    (!groupPlot || !horizontal) && row(num("ymin", "Y min"), num("ymax", "Y max")),
-    (!groupPlot || horizontal) && row(num("xmin", "X min"), num("xmax", "X max")),
-    groupPlot && horizontal && note("Horizontal plots put values on the x-axis."),
+    (groupPlot || bars) && tog("cat_ticks", "Tick marks on the group axis"),
+    (!(groupPlot || bars) || !horizontal) && row(num("ymin", "Y min"), num("ymax", "Y max")),
+    (!(groupPlot || bars) || horizontal) && row(num("xmin", "X min"), num("xmax", "X max")),
+    (groupPlot || bars) && horizontal && note("Horizontal plots put values on the x-axis."),
     a === "timecourse" && row(num("ymin", "Y min"), num("ymax", "Y max")),
-    row(tog("logy", groupPlot ? "Log scale (values)" : "Log scale Y"), a === "correlation" && tog("logx", "Log scale X")),
+    row(tog("logy", groupPlot ? "Log scale (values)" : "Log scale Y"), ["correlation", "curvefit"].includes(a) && tog("logx", "Log scale X")),
     row(num("ytick_step", "Y tick spacing"), num("xtick_step", "X tick spacing")),
     row(num("y_nticks", "About how many Y ticks"), num("x_nticks", "About how many X ticks")),
     num("y_decimals", "Decimal places on the value axis"),
@@ -1106,11 +1441,11 @@ function styleSchema() {
     seg("grid", "Gridlines", [["none", "None"], ["y", "Horizontal"], ["x", "Vertical"], ["both", "Both"]]),
     s.grid !== "none" && row(sel("grid_style", "Grid line style", [["solid", "Solid"], ["dashed", "Dashed"], ["dotted", "Dotted"]]), num("grid_alpha", "Grid opacity", { placeholder: "0.15" })),
     txt("ref_lines", "Reference lines", { placeholder: "y=100: Baseline; x=0", hint: "Separate with semicolons. Use y=…, x=… or y=x, with an optional label after a colon." }),
-    lines && sec("Legend"),
-    lines && sel("legend", "Position", [["best", "Best spot"], ["upper right", "Top right"], ["upper left", "Top left"], ["lower right", "Bottom right"], ["lower left", "Bottom left"], ["center right", "Middle right"], ["outside", "Outside, right"], ["outside top", "Above the plot"], ["none", "Hidden"]]),
-    lines && row(num("legend_cols", "Columns", { placeholder: "1" }), tog("legend_frame", "Frame")),
-    lines && num("legend_size", "Legend text size (pt)", { placeholder: "auto" }),
-    lines && txt("legend_title", "Legend title"),
+    legend && sec("Legend"),
+    legend && sel("legend", "Position", [["best", "Best spot"], ["upper right", "Top right"], ["upper left", "Top left"], ["lower right", "Bottom right"], ["lower left", "Bottom left"], ["center right", "Middle right"], ["outside", "Outside, right"], ["outside top", "Above the plot"], ["none", "Hidden"]]),
+    legend && row(num("legend_cols", "Columns", { placeholder: "1" }), tog("legend_frame", "Frame")),
+    legend && num("legend_size", "Legend text size (pt)", { placeholder: "auto" }),
+    legend && txt("legend_title", "Legend title"),
     sec("Size and export"),
     row(num("width", "Width (in)", { hint: mm(s.width) + " mm" }), num("height", "Height (in)", { hint: mm(s.height) + " mm" })),
     a === "timecourse" && num("endpoint_width", "Endpoint plot width (in)", { placeholder: "auto" }),
@@ -1131,22 +1466,53 @@ function renderSteps() {
   ["analysis", "data", "settings", "style"].forEach((s) => ($("#panel-" + s).hidden = s !== state.step));
 }
 
+let analysisFilter = "";
+let chooserPath = null; // null = closed; otherwise the list of node ids visited
+function renderChooser() {
+  if (!chooserPath) return "";
+  const node = CHOOSER[chooserPath[chooserPath.length - 1]];
+  return `<div class="chooser" aria-live="polite">
+    <div class="chooser-head"><b>${esc(node.q)}</b><button type="button" class="link-btn" data-chooser="close">Close</button></div>
+    <div class="chooser-opts">${node.o.map(([label, hint, next]) => `<button type="button" class="chooser-opt" data-chooser="${esc(next)}"><span>${esc(label)}</span><small>${esc(hint)}</small></button>`).join("")}</div>
+    ${chooserPath.length > 1 ? '<button type="button" class="link-btn" data-chooser="back">← Back</button>' : ""}
+  </div>`;
+}
 function renderAnalysis() {
-  $("#panel-analysis").innerHTML = `
-    <p class="panel-intro">What do you want to find out? Pick an analysis, then add your data. Try an example to see how each one works.</p>
-    <div class="choice-list">
-      ${ANALYSES.map((a) => `
-        <div class="choice" role="button" tabindex="0" data-analysis="${a.id}" aria-pressed="${state.analysis === a.id}">
-          <span class="choice-icon">${a.icon}</span>
-          <div><h3>${esc(a.title)}</h3><p>${esc(a.desc)}</p></div>
-          <div class="choice-foot"><button type="button" class="btn btn-small" data-example="${a.id}">Try example</button></div>
-        </div>`).join("")}
+  const q = analysisFilter.trim().toLowerCase();
+  const card = (a) => `
+    <div class="choice" role="button" tabindex="0" data-analysis="${a.id}" aria-pressed="${state.analysis === a.id}">
+      <span class="choice-icon">${a.icon}</span>
+      <div class="choice-text"><h3>${esc(a.title)}</h3><p>${esc(a.desc)}</p></div>
+      <button type="button" class="btn btn-small choice-try" data-example="${a.id}" title="Open example data for ${esc(a.title.toLowerCase())}">Example</button>
+    </div>`;
+  const match = (a) => !q || (a.title + " " + a.desc + " " + a.id).toLowerCase().includes(q);
+  const groups = ANALYSIS_GROUPS.map(([name, ids]) => [name, ids.map((id) => ANALYSES.find((a) => a.id === id)).filter((a) => a && match(a))]).filter(([, list]) => list.length);
+  const p = $("#panel-analysis");
+  const focused = document.activeElement && document.activeElement.id === "analysis-search";
+  p.innerHTML = `
+    <p class="panel-intro">What do you want to find out? Pick an analysis, then add your data, or open an example to see how it works.</p>
+    <div class="analysis-tools">
+      <input type="search" id="analysis-search" placeholder="Search: ELISA, ANOVA, half-life, qPCR…" value="${esc(analysisFilter)}" spellcheck="false" aria-label="Search analyses">
+      <button type="button" class="btn btn-small" data-chooser="start" aria-expanded="${!!chooserPath}">Help me choose</button>
     </div>
+    ${renderChooser()}
+    ${groups.length ? groups.map(([name, list]) => `<div class="choice-group"><div class="section-title">${esc(name)}</div><div class="choice-list">${list.map(card).join("")}</div></div>`).join("")
+      : `<p class="hint">Nothing matches “${esc(analysisFilter)}”. Try <button type="button" class="link-btn" data-chooser="start">Help me choose</button>.</p>`}
     <p class="fine">Your data stays on this computer. Serpentine runs Python inside your browser, and nothing is uploaded.</p>`;
+  if (focused) {
+    const el = $("#analysis-search");
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }
 }
 
 function renderData() {
   const p = $("#panel-data");
+  if (NO_DATA.has(state.analysis)) {
+    p.innerHTML = `<div class="empty-note"><h3>No data needed</h3><p>${esc(ANALYSES.find((a) => a.id === state.analysis).title)} works from the numbers you expect. Set them in step 3, Settings.</p>
+      <div class="btn-row"><button type="button" class="btn btn-primary btn-small" data-goto="settings">Go to Settings</button></div></div>`;
+    return;
+  }
   const tc = state.analysis === "timecourse";
   const act = activeDataset();
   const unit = state.settings.timecourse.time_unit || "seconds";
@@ -1318,7 +1684,9 @@ function renderResults(out) {
   const firstResult = !lastResult;
   const groupsChanged = JSON.stringify(lastResult?.group_styles || null) !== JSON.stringify(r.group_styles || null);
   const eventsChanged = JSON.stringify(lastResult?.events || {}) !== JSON.stringify(r.events || {});
+  const metaChanged = JSON.stringify(lastResult?.meta || {}) !== JSON.stringify(r.meta || {});
   lastResult = r;
+  if (metaChanged && state.step === "settings") renderSettings();
   if (groupsChanged && state.step === "style") renderStyle();
   if (eventsChanged && state.step === "data" && state.analysis === "timecourse" && !(document.activeElement && document.activeElement.dataset && document.activeElement.dataset.meta)) renderData();
   $("#figures").innerHTML = r.figures.map((f, i) => `
@@ -1329,6 +1697,9 @@ function renderResults(out) {
         <button type="button" class="btn btn-small" data-export="${i}" data-format="svg">SVG</button>
         <button type="button" class="btn btn-small" data-export="${i}" data-format="pdf">PDF</button>
         <select class="btn btn-small more-formats" data-more="${i}" aria-label="More formats"><option value="">More…</option><option value="tiff">TIFF</option><option value="jpg">JPG</option><option value="eps">EPS</option></select>
+        ${boardEdit && boardEdit.index === i && state.board.panels.some((p) => p.id === boardEdit.id)
+          ? `<button type="button" class="btn btn-small btn-primary" data-board-update="${i}" title="Replace the board panel you're editing with this figure">Update panel ${esc(boardLetter(state.board.panels.findIndex((p) => p.id === boardEdit.id)))}</button>`
+          : `<button type="button" class="btn btn-small btn-board" data-board-add="${i}" title="Add to the figure board to build a multi-panel figure">+ Board</button>`}
       </div>
       <div class="figure-body">${f.svg}</div>
     </figure>`).join("");
@@ -1500,12 +1871,18 @@ const ANALYSIS_HELP = {
   correlation: ["Statistics", ["plot glucose against weight", "color by genotype", "use spearman", "hide the fit line", "remove the confidence band"]],
   dose: ["Curve fit", ["fix the bottom at 0", "fix top at 100", "call it IC50", "show every replicate"]],
   survival: ["Survival", ["show the number at risk", "hide the confidence band", "show the median", "hide censor marks", "show as proportion", "time in weeks"]],
+  twoway: ["Two-way ANOVA", ["log transform", "compare every combination", "within each genotype", "no post-hoc comparisons"]],
+  qpcr: ["qPCR", ["show log2 fold change", "relative expression", "compare all pairs", "use a nonparametric test"]],
+  stdcurve: ["Standard curve", ["use 5PL", "straight line", "subtract the blank", "weight 1/y2", "dilution factor 10", "hide the guide lines"]],
+  curvefit: ["Curve fit", ["fit one-phase decay", "Michaelis-Menten", "logistic growth", "show residuals", "show the confidence band", "compare Km"]],
+  contingency: ["Counts", ["use Fisher's exact test", "chi-square", "grouped bars", "stacked counts", "hide the numbers in the bars"]],
+  power: ["Sample size", ["90% power", "alpha 0.01", "one-sided", "15% dropout", "paired design", "compare proportions"]],
 };
 
 function commandExamples() {
   const g = lastResult?.group_styles?.[0]?.label || "the first group";
   const base = ["remove gridlines", `make ${g} red`, "dark background", "font size 12", "use viridis"];
-  if (state.analysis === "compare" || state.analysis === "timecourse") base.splice(2, 0, "horizontal violin plot");
+  if (GROUP_PLOTS.has(state.analysis)) base.splice(2, 0, state.analysis === "twoway" || state.analysis === "qpcr" ? "make it a dot plot" : "horizontal violin plot");
   else base.splice(2, 0, "hide the legend");
   return base;
 }
@@ -1640,6 +2017,42 @@ function bindCommandBar() {
 // ============================================================================
 // Events
 // ============================================================================
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const KEYS = { mod: IS_MAC ? "⌘" : "Ctrl+", shift: IS_MAC ? "⇧" : "Shift+", redo: IS_MAC ? "⇧⌘Z" : "Ctrl+Y" };
+const SHORTCUTS = [
+  ["Editing", [[KEYS.mod + "Z", "Undo"], [IS_MAC ? "⇧⌘Z" : "Ctrl+Shift+Z / Ctrl+Y", "Redo"], ["H", "Show the undo history"]]],
+  ["Project", [[KEYS.mod + "S", "Save project"], [KEYS.mod + "O", "Open a project"], [KEYS.mod + "Enter", "Run the analysis again"]]],
+  ["Moving around", [["1 – 4", "Analysis, Data, Settings, Style"], ["/  or  " + KEYS.mod + "K", "Type a command"], ["Esc", "Close a window, leave a field"]]],
+  ["Figures", [[KEYS.mod + "E", "Export the first figure as PNG"], [IS_MAC ? "⇧⌘E" : "Ctrl+Shift+E", "Export it as SVG"], [IS_MAC ? "⇧⌘C" : "Ctrl+Shift+C", "Copy it as an image"], ["B", "Open the figure board"], ["+", "Add the first figure to the board"]]],
+  ["Other", [["T", "Switch the app theme"], ["?", "Show these shortcuts"]]],
+];
+function openShortcuts() {
+  $("#shortcuts-body").innerHTML = SHORTCUTS.map(([g, list]) => `<div class="sc-group"><div class="section-title">${esc(g)}</div>${list.map(([k, d]) => `<div class="sc-row"><span>${esc(d)}</span><kbd>${esc(k)}</kbd></div>`).join("")}</div>`).join("")
+    + `<p class="fine sc-note">Single-key shortcuts work when you're not typing in a field. While typing, ${KEYS.mod}Z undoes the text in that field, as usual.</p>`;
+  $("#shortcuts").hidden = false;
+  $("#shortcuts .sc-close").focus();
+}
+function closeShortcuts() {
+  $("#shortcuts").hidden = true;
+}
+
+function focusCommand() {
+  const input = $("#command-input");
+  if ($("#command-form").hidden) return toast("Commands appear once there's a figure.");
+  input.focus();
+  input.select();
+}
+function toggleHistoryMenu(force) {
+  const m = $("#history-menu");
+  const open = force === undefined ? m.hidden : force;
+  if (open) {
+    clearTimeout(history.timer);
+    commitHistory();
+    renderHistoryMenu();
+  }
+  m.hidden = !open;
+  $("#btn-history").setAttribute("aria-expanded", String(open));
+}
 function isTyping(el) {
   return el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
 }
@@ -1670,7 +2083,28 @@ function bindEvents() {
     renderStyle();
     changed();
   };
+  pa.addEventListener("input", (e) => {
+    if (e.target.id !== "analysis-search") return;
+    analysisFilter = e.target.value;
+    renderAnalysis();
+  });
   pa.addEventListener("click", (e) => {
+    const ch = e.target.closest("[data-chooser]");
+    if (ch) {
+      const v = ch.dataset.chooser;
+      if (v === "close") chooserPath = null;
+      else if (v === "back") chooserPath.pop();
+      else if (v === "start") chooserPath = chooserPath && !ch.classList.contains("link-btn") ? null : ["start"];
+      else if (v.startsWith("=")) {
+        chooserPath = null;
+        analysisFilter = "";
+        pickAnalysis(v.slice(1));
+        toast("Picked: " + ANALYSES.find((a) => a.id === v.slice(1)).title);
+        return;
+      } else chooserPath.push(v);
+      renderAnalysis();
+      return;
+    }
     const ex = e.target.closest("[data-example]");
     if (ex) {
       e.stopPropagation();
@@ -1693,6 +2127,13 @@ function bindEvents() {
   const pd = $("#panel-data");
   pd.addEventListener("click", (e) => {
     const t = e.target;
+    const go = t.closest("[data-goto]");
+    if (go) {
+      state.step = go.dataset.goto;
+      renderSettings();
+      renderSteps();
+      return;
+    }
     if (t.closest("#btn-add")) {
       newDataset(nextName());
       renderData();
@@ -1810,6 +2251,10 @@ function bindEvents() {
   bindForm($("#panel-style"), () => state.style, renderStyle);
 
   $(".stage").addEventListener("click", (e) => {
+    const ba = e.target.closest("[data-board-add]");
+    if (ba) return addToBoard(+ba.dataset.boardAdd);
+    const bu = e.target.closest("[data-board-update]");
+    if (bu) return updateBoardPanel(+bu.dataset.boardUpdate);
     const ex = e.target.closest("[data-export]");
     if (ex) return exportFigure(+ex.dataset.export, ex.dataset.format);
     const cf = e.target.closest("[data-copy-fig]");
@@ -1851,9 +2296,8 @@ function bindEvents() {
       if (!adopt(JSON.parse(await f.text()))) throw new Error();
       Object.keys(inspected).forEach((k) => delete inspected[k]);
       await Promise.all(state.datasets.map((d) => inspectNow(d.id)));
-      history.past = [];
-      history.future = [];
-      history.last = snapshot();
+      clearTimeout(history.timer);
+      commitHistory(); // opening a project is one undoable step
       renderAll();
       autosave();
       runNow();
@@ -1865,8 +2309,10 @@ function bindEvents() {
   $("#btn-new").addEventListener("click", (e) => {
     armConfirm(e.currentTarget, "Discard current?", () => {
       const keepStyle = state.style;
+      const keepBoard = state.board;
       state = freshState();
       state.style = { ...keepStyle, groups: {} };
+      state.board = keepBoard;
       Object.keys(inspected).forEach((k) => delete inspected[k]);
       renderAll();
       renderEmptyStage();
@@ -1875,17 +2321,262 @@ function bindEvents() {
   });
   document.addEventListener("keydown", (e) => {
     const mod = e.metaKey || e.ctrlKey;
-    if (mod && e.key.toLowerCase() === "s") {
-      e.preventDefault();
-      saveProject();
-    } else if (mod && e.key.toLowerCase() === "z" && !isTyping(document.activeElement)) {
-      e.preventDefault();
-      if (e.shiftKey) redo();
-      else undo();
-    } else if (mod && e.key.toLowerCase() === "y" && !isTyping(document.activeElement)) {
-      e.preventDefault();
-      redo();
+    const key = e.key.toLowerCase();
+    const el = document.activeElement;
+    // Text fields keep their own text undo; checkboxes, buttons and menus use the app's undo.
+    const textField = el && (el.tagName === "TEXTAREA" || el.isContentEditable || (el.tagName === "INPUT" && !["checkbox", "radio", "color", "range", "button", "file"].includes(el.type)));
+    const dialogOpen = !$("#board").hidden || !$("#shortcuts").hidden;
+    if (e.key === "Escape") {
+      if (!$("#shortcuts").hidden) return closeShortcuts();
+      if (!$("#history-menu").hidden) return toggleHistoryMenu(false);
+      if (textField && el.id !== "command-input") return el.blur();
+      return;
     }
+    if (mod && !e.altKey) {
+      if (key === "s") { e.preventDefault(); return saveProject(); }
+      if (key === "o") { e.preventDefault(); return $("#open-file").click(); }
+      if (key === "z" && !textField) { e.preventDefault(); return e.shiftKey ? redo() : undo(); }
+      if (key === "y" && !textField) { e.preventDefault(); return redo(); }
+      if (key === "k") { e.preventDefault(); return focusCommand(); }
+      if (key === "enter") { e.preventDefault(); return runNow(); }
+      if (key === "e" && lastResult?.figures?.length) { e.preventDefault(); return exportFigure(0, e.shiftKey ? "svg" : "png"); }
+      if (key === "c" && e.shiftKey && lastResult?.figures?.length && !textField) { e.preventDefault(); return copyFigure(0); }
+      return;
+    }
+    if (textField || e.altKey || (el && el.tagName === "SELECT")) return;
+    if (e.key === "?") { e.preventDefault(); return $("#shortcuts").hidden ? openShortcuts() : closeShortcuts(); }
+    if (dialogOpen) return;
+    if (/^[1-4]$/.test(e.key)) {
+      const step = ["analysis", "data", "settings", "style"][+e.key - 1];
+      $(`.step[data-step="${step}"]`).click();
+      return;
+    }
+    if (e.key === "/") { e.preventDefault(); return focusCommand(); }
+    if (key === "b") return openBoard();
+    if (e.key === "+" || e.key === "=") { if (lastResult?.figures?.length) addToBoard(0); return; }
+    if (key === "t") return $("#btn-theme").click();
+    if (key === "h") return toggleHistoryMenu();
+  });
+  $("#btn-shortcuts").addEventListener("click", openShortcuts);
+  $("#shortcuts").addEventListener("click", (e) => {
+    if (e.target.id === "shortcuts" || e.target.closest(".sc-close")) closeShortcuts();
+  });
+  $("#btn-history").addEventListener("click", (e) => { e.stopPropagation(); toggleHistoryMenu(); });
+  $("#history-menu").addEventListener("click", (e) => {
+    const j = e.target.closest("[data-jump]");
+    if (j) { toggleHistoryMenu(false); jumpHistory(+j.dataset.jump); }
+  });
+  document.addEventListener("click", (e) => {
+    if (!$("#history-menu").hidden && !e.target.closest("#history-menu")) toggleHistoryMenu(false);
+  });
+}
+
+// ============================================================================
+// Figure board: collect figures from any analysis into one multi-panel figure
+// ============================================================================
+let boardEdit = null; // {id, index} of the panel being edited in the main workspace
+function boardLetter(k) {
+  const L = state.board.letters;
+  if (!L || L === "none" || k < 0) return k < 0 ? "" : String(k + 1);
+  const ch = String.fromCharCode((/a/.test(L) ? 97 : 65) + k);
+  return ({ "A)": ch + ")", "a)": ch + ")", "(A)": "(" + ch + ")", "(a)": "(" + ch + ")" })[L] || ch;
+}
+function panelFromFigure(i) {
+  const f = lastResult?.figures?.[i];
+  if (!f) return null;
+  const a = runArgs();
+  return { id: uid(), title: f.title, from: state.name, analysis: state.analysis, svg: f.svg, index: i, config: clone(a.config), datasets: clone(a.datasets) };
+}
+function renderBoardCount() {
+  const n = state.board.panels.length;
+  $("#board-count").textContent = n ? String(n) : "";
+  $("#board-count").hidden = !n;
+}
+function addToBoard(i) {
+  const p = panelFromFigure(i);
+  if (!p) return;
+  if (state.board.panels.length >= 12) return toast("The board holds up to 12 panels.");
+  state.board.panels.push(p);
+  changed({ run: false });
+  renderBoardCount();
+  const btn = $("#btn-board");
+  btn.classList.remove("pulse");
+  void btn.offsetWidth;
+  btn.classList.add("pulse");
+  toast(`Added as panel ${boardLetter(state.board.panels.length - 1)}. Open Board to arrange and export.`);
+}
+function updateBoardPanel(i) {
+  const k = state.board.panels.findIndex((p) => p.id === boardEdit?.id);
+  const p = panelFromFigure(i);
+  if (k < 0 || !p) return;
+  p.id = boardEdit.id;
+  state.board.panels[k] = p;
+  boardEdit = null;
+  changed({ run: false });
+  renderResults({ ok: lastResult });
+  toast(`Panel ${boardLetter(k)} updated`);
+  openBoard();
+}
+function openBoard() {
+  renderBoard();
+  $("#board").hidden = false;
+  document.body.classList.add("board-open");
+  $("#board .board-close")?.focus();
+}
+function closeBoard() {
+  $("#board").hidden = true;
+  document.body.classList.remove("board-open");
+  $("#btn-board").focus();
+}
+function renderBoard() {
+  const b = state.board;
+  const opt = (list, v) => list.map(([val, lab]) => `<option value="${esc(val)}"${String(v) === String(val) ? " selected" : ""}>${esc(lab)}</option>`).join("");
+  const cells = b.panels.map((p, k) => `
+    <div class="board-cell" data-panel="${p.id}">
+      ${b.letters !== "none" ? `<span class="board-letter" style="font-size:${Math.max(9, Math.min(28, +b.letter_size || 14))}px">${esc(boardLetter(k))}</span>` : ""}
+      <div class="board-fig">${p.svg}</div>
+      <div class="board-meta"><span title="${esc(p.from)}">${esc(p.title)} · ${esc(p.from)}</span>
+        <span class="board-tools">
+          <button type="button" class="icon-btn" data-bmove="-1" aria-label="Move earlier" ${k === 0 ? "disabled" : ""}>←</button>
+          <button type="button" class="icon-btn" data-bmove="1" aria-label="Move later" ${k === b.panels.length - 1 ? "disabled" : ""}>→</button>
+          <button type="button" class="btn btn-small" data-bedit title="Load this panel's data and settings to change it">Edit</button>
+          <button type="button" class="icon-btn" data-bremove aria-label="Remove panel">×</button>
+        </span></div>
+    </div>`).join("");
+  $("#board-body").innerHTML = `
+    <div class="board-controls">
+      <div class="field"><span class="field-label">Columns</span><div class="segmented">${[1, 2, 3, 4].map((n) => `<button type="button" data-bset="cols" data-value="${n}" aria-pressed="${+b.cols === n}">${n}</button>`).join("")}</div></div>
+      <div class="field"><label for="b-width">Width</label><select id="b-width" data-bset="width">${opt([[3.5, "Single column · 89 mm"], [5.5, "1.5 columns · 140 mm"], [7.2, "Double column · 183 mm"], [10, "Poster · 254 mm"], [0, "Natural size"]], b.width)}</select></div>
+      <div class="field"><label for="b-letters">Panel letters</label><select id="b-letters" data-bset="letters">${opt([["A", "A B C"], ["a", "a b c"], ["A)", "A) B) C)"], ["(a)", "(a) (b) (c)"], ["none", "None"]], b.letters)}</select></div>
+      <div class="field"><label for="b-lsize">Letter size (pt)</label><input type="number" id="b-lsize" data-bset="letter_size" value="${esc(b.letter_size)}" min="6" max="40" step="1"></div>
+      <div class="field"><label for="b-gap">Gap (in)</label><input type="number" id="b-gap" data-bset="gap" value="${esc(b.gap)}" min="0" max="2" step="0.05"></div>
+      <div class="field"><label for="b-dpi">Resolution</label><select id="b-dpi" data-bset="dpi">${opt([[300, "300 dpi"], [600, "600 dpi"], [1200, "1200 dpi"]], b.dpi)}</select></div>
+    </div>
+    ${b.panels.length ? `<div class="board-grid" style="--cols:${Math.min(+b.cols || 2, Math.max(1, b.panels.length))}">${cells}</div>`
+      : `<div class="board-empty"><h3>Your board is empty</h3><p>Press <b>+ Board</b> above any figure to add it here. Panels can come from different analyses and datasets: a dose-response, a time course and a bar chart can sit side by side in one figure, lettered A, B, C.</p></div>`}
+    <div class="board-foot">
+      <span class="hint">${b.panels.length} of 12 panels. Each panel keeps its own data and style, and is redrawn at full quality on export.</span>
+      <div class="btn-row">
+        ${b.panels.length ? '<button type="button" class="btn btn-small btn-danger" data-bclear>Clear board</button>' : ""}
+        <button type="button" class="btn btn-small" data-bexport="svg" ${b.panels.length ? "" : "disabled"}>SVG</button>
+        <button type="button" class="btn btn-small" data-bexport="tiff" ${b.panels.length ? "" : "disabled"}>TIFF</button>
+        <button type="button" class="btn btn-small" data-bexport="pdf" ${b.panels.length ? "" : "disabled"}>PDF</button>
+        <button type="button" class="btn btn-small btn-primary" data-bexport="png" ${b.panels.length ? "" : "disabled"}>Export PNG</button>
+      </div>
+    </div>`;
+}
+async function exportBoard(fmt, btn) {
+  const b = state.board;
+  if (!engineReady) return toast("Wait for Python to finish loading.");
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Drawing…";
+  const out = await call("board", { panels: b.panels.map((p) => ({ config: p.config, datasets: p.datasets, index: p.index })), cols: b.cols, width: +b.width, format: fmt, dpi: +b.dpi, letters: b.letters, letter_size: +b.letter_size || 14, gap: +b.gap || 0 });
+  btn.disabled = false;
+  btn.textContent = label;
+  if (out.error) return toast(out.error);
+  download(`${slug(state.name)}_figure.${fmt}`, b64ToBlob(out.ok, { png: "image/png", svg: "image/svg+xml", tiff: "image/tiff", pdf: "application/pdf" }[fmt]));
+  toast("Multi-panel figure saved");
+}
+function bindBoard() {
+  $("#btn-board").addEventListener("click", openBoard);
+  const box = $("#board");
+  box.addEventListener("click", (e) => {
+    const t = e.target;
+    if (t === box || t.closest(".board-close")) return closeBoard();
+    const set = t.closest("button[data-bset]");
+    if (set) {
+      state.board[set.dataset.bset] = +set.dataset.value;
+      changed({ run: false });
+      return renderBoard();
+    }
+    const cell = t.closest("[data-panel]");
+    const k = cell ? state.board.panels.findIndex((p) => p.id === cell.dataset.panel) : -1;
+    const mv = t.closest("[data-bmove]");
+    if (mv && k >= 0) {
+      const j = k + +mv.dataset.bmove;
+      const P = state.board.panels;
+      [P[k], P[j]] = [P[j], P[k]];
+      changed({ run: false });
+      return renderBoard();
+    }
+    if (t.closest("[data-bremove]") && k >= 0) {
+      state.board.panels.splice(k, 1);
+      changed({ run: false });
+      renderBoardCount();
+      return renderBoard();
+    }
+    const ed = t.closest("[data-bedit]");
+    if (ed && k >= 0) {
+      const go = () => {
+        const p = state.board.panels[k];
+        state.analysis = p.config.analysis;
+        state.settings[p.analysis] = { ...DEFAULT_SETTINGS[p.analysis], ...clone(p.config.settings) };
+        state.style = { ...clone(DEFAULT_STYLE), ...clone(p.config.style) };
+        state.datasets = clone(p.datasets).map((d) => ({ ...d, meta: { group: "", subject: "", event: "", exclude: "", ...(d.meta || {}) } }));
+        state.active = state.datasets[0]?.id || null;
+        state.example = null;
+        $("#example-badge").hidden = true;
+        state.name = p.from;
+        boardEdit = { id: p.id, index: p.index };
+        Object.keys(inspected).forEach((key) => delete inspected[key]);
+        state.datasets.forEach((d) => scheduleInspect(d.id, 10));
+        closeBoard();
+        renderAll();
+        changed();
+        toast(`Editing panel ${boardLetter(k)}. Change anything, then press Update panel on the figure.`);
+      };
+      if (state.datasets.length && !state.example) return armConfirm(ed, "Replace current work?", go);
+      return go();
+    }
+    if (t.closest("[data-bclear]")) {
+      return armConfirm(t.closest("[data-bclear]"), "Click again to clear", () => {
+        state.board.panels = [];
+        changed({ run: false });
+        toast("Board cleared. Undo brings it back.");
+        renderBoardCount();
+        renderBoard();
+      });
+    }
+    const ex = t.closest("[data-bexport]");
+    if (ex) return exportBoard(ex.dataset.bexport, ex);
+  });
+  box.addEventListener("change", (e) => {
+    const k = e.target.dataset.bset;
+    if (!k) return;
+    state.board[k] = k === "letters" ? e.target.value : parseFloat(e.target.value) || 0;
+    changed({ run: false });
+    renderBoard();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !box.hidden) closeBoard();
+  });
+}
+
+// ============================================================================
+// Theme (the app's own light/dark mode; figures have their own theme in Style)
+// ============================================================================
+const THEME_KEY = "serpentine.theme.v1";
+const THEME_ICONS = {
+  auto: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>',
+  light: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg>',
+  dark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>',
+};
+function applyTheme(mode) {
+  if (mode === "light" || mode === "dark") document.documentElement.dataset.theme = mode;
+  else delete document.documentElement.dataset.theme;
+  const btn = $("#btn-theme");
+  btn.innerHTML = THEME_ICONS[mode] || THEME_ICONS.auto;
+  btn.title = "App theme: " + ({ light: "light", dark: "dark" }[mode] || "matches your system") + " (click to change)";
+}
+function bindTheme() {
+  let mode = store(THEME_KEY) || "auto";
+  applyTheme(mode);
+  $("#btn-theme").addEventListener("click", () => {
+    mode = { auto: "light", light: "dark", dark: "auto" }[mode] || "auto";
+    store(THEME_KEY, mode);
+    applyTheme(mode);
+    toast({ auto: "Theme follows your system", light: "Light theme", dark: "Dark theme" }[mode]);
   });
 }
 
@@ -1893,6 +2584,8 @@ function bindEvents() {
 // Start
 // ============================================================================
 bindEvents();
+bindBoard();
+bindTheme();
 bindCommandBar();
 bindWelcome();
 if (!restore()) {
@@ -1901,6 +2594,7 @@ if (!restore()) {
 }
 history.last = snapshot();
 renderAll();
+renderBoardCount();
 if (servedFromDisk) {
   setStatus("failed", "Needs the launcher");
   $(".spinner").hidden = true;

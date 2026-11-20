@@ -10,8 +10,8 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <!-- Figure fonts, so previews match PNG/PDF exports -->
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Fira+Sans:wght@400;700&family=Barlow:wght@400;700&family=Poppins:wght@400;700&family=PT+Serif:wght@400;700&family=Crimson+Text:wght@400;700&family=Courier+Prime:wght@400;700&family=Space+Mono:wght@400;700&family=Comic+Neue:wght@400;700&display=swap">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M21.5 6.5c-5.5 0-11 1.6-11 5.4s11 3.8 11 8.2-5.5 5.4-11 5.4' fill='none' stroke='%232456C7' stroke-width='3.2' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='6.5' r='2.9' fill='%232456C7'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="app.css?v=0.7.0">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M21.5 6.5c-5.5 0-11 1.6-11 5.4s11 3.8 11 8.2-5.5 5.4-11 5.4' fill='none' stroke='%23127055' stroke-width='3.2' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='6.5' r='2.9' fill='%23127055'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="app.css?v=0.8.0">
 </head>
 <body>
 <header class="topbar">
@@ -23,12 +23,19 @@
   <span id="example-badge" class="badge badge-example" hidden>Example data</span>
   <div class="topbar-actions">
     <span id="engine-status" class="status status-loading" role="status"><span class="dot"></span><span class="status-text">Starting Python</span></span>
-    <button id="btn-undo" class="btn btn-ghost" type="button" title="Undo (⌘Z)" disabled>Undo</button>
-    <button id="btn-redo" class="btn btn-ghost" type="button" title="Redo (⇧⌘Z)" disabled>Redo</button>
+    <button id="btn-board" class="btn btn-ghost btn-board-top" type="button" title="Figure board: combine figures into one multi-panel figure"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.2"/></svg>Board<span id="board-count" class="count" hidden></span></button>
+    <div class="undo-group">
+      <button id="btn-undo" class="btn btn-ghost btn-icon-label" type="button" title="Undo" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>Undo</button>
+      <button id="btn-redo" class="btn btn-ghost btn-icon-label" type="button" title="Redo" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg>Redo</button>
+      <button id="btn-history" class="icon-btn" type="button" title="Undo history (H)" aria-label="Undo history" aria-expanded="false" aria-controls="history-menu" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4h4"/><path d="M12 7.5V12l3 2"/></svg></button>
+      <div id="history-menu" class="history-menu" role="menu" hidden></div>
+    </div>
     <button id="btn-new" class="btn btn-ghost" type="button">New</button>
     <button id="btn-open" class="btn btn-ghost" type="button">Open</button>
     <button id="btn-save" class="btn btn-ghost" type="button" title="Save project (⌘S)">Save</button>
     <input id="open-file" type="file" accept=".json" hidden>
+    <button id="btn-theme" class="icon-btn theme-btn" type="button" aria-label="Change app theme"></button>
+    <button id="btn-shortcuts" class="icon-btn" type="button" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M9 10h.01M12 10h.01M15 10h.01M18 10h.01M7.5 14h9"/></svg></button>
   </div>
 </header>
 
@@ -98,8 +105,23 @@
     </div>
   </section>
 </main>
+<div id="board" class="board" role="dialog" aria-modal="true" aria-labelledby="board-title" hidden>
+  <div class="board-sheet">
+    <div class="board-head">
+      <div><h2 id="board-title">Figure board</h2><p class="fine">Combine figures from any analysis into one lettered, journal-sized figure.</p></div>
+      <button type="button" class="icon-btn board-close" aria-label="Close the board">×</button>
+    </div>
+    <div id="board-body" class="board-body"></div>
+  </div>
+</div>
+<div id="shortcuts" class="board" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title" hidden>
+  <div class="board-sheet sc-sheet">
+    <div class="board-head"><h2 id="shortcuts-title">Keyboard shortcuts</h2><button type="button" class="icon-btn sc-close" aria-label="Close">×</button></div>
+    <div id="shortcuts-body" class="board-body sc-body"></div>
+  </div>
+</div>
 <div id="toast" class="toast" role="status" hidden></div>
-<script src="commands.js?v=0.7.0"></script>
-<script src="app.js?v=0.7.0"></script>
+<script src="commands.js?v=0.8.0"></script>
+<script src="app.js?v=0.8.0"></script>
 </body>
 </html>
