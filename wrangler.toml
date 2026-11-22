@@ -1,0 +1,8 @@
+name = "serpentine"
+pages_build_output_dir = "dist"
+compatibility_date = "2024-09-23"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "serpentine"
+database_id = "73d2f3ae-c2b8-4e2f-ad85-bcc68936392e"

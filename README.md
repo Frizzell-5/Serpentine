@@ -2,7 +2,7 @@
 
 **Analyze lab data and make publication-quality figures without writing code.**
 
-**[Open Serpentine](https://frizzell-5.github.io/Serpentine/app.html)** · [Website & guide](https://frizzell-5.github.io/Serpentine/) · [Download](https://github.com/Frizzell-5/Serpentine/releases/latest/download/Serpentine.zip)
+**[Open Serpentine](https://serpentine-4qu.pages.dev/app.html)** · [Website & guide](https://serpentine-4qu.pages.dev/) · [Download](https://github.com/Frizzell-5/Serpentine/releases/latest/download/Serpentine.zip)
 
 Serpentine is a browser-based analysis tool for researchers. You paste or upload your data, choose an analysis, adjust the settings and figure style in plain menus, and get statistics, figures and a methods paragraph. Python (NumPy, SciPy, pandas, matplotlib) does the work behind the scenes, right inside the browser, so there is nothing to install and your data never leaves your computer.
 
@@ -15,7 +15,7 @@ Serpentine is a browser-based analysis tool for researchers. You paste or upload
 - **Plain-English commands.** Type “remove gridlines and make Control navy”, “baseline from -2 to 0”, “make it look professional” or “export as pdf” into the command bar. Hundreds of phrasings, typo correction and suggestions. Runs locally: instant, free and private.
 - **Python when you want it.** An optional box runs your own matplotlib code on each figure, and raw rcParams settings take one line each.
 - **Built for real lab data.** It reads tables pasted from LabChart Data Pads, Excel and Prism, including multi-row headers, clock times (`10:30`) and European decimal commas.
-- **Private by design.** All computation runs locally in your browser through [Pyodide](https://pyodide.org). Nothing is uploaded to a server.
+- **Private by design.** All computation runs locally in your browser through [Pyodide](https://pyodide.org). Optional accounts save projects online with end-to-end encryption: they're encrypted in your browser with your password, so the server only stores data it can't read.
 - **Reproducible.** Every analysis can be downloaded as a standalone Python script that recreates the same statistics and figures, for lab records, reviewers or further customization.
 
 ## Analyses
@@ -49,7 +49,7 @@ Compare groups can also flag or remove outliers (Grubbs' test or Tukey's fences)
 
 Serpentine is a static web app. It needs to be served over HTTP (not opened as a file) because the Python engine runs in a web worker.
 
-**Online:** open <https://frizzell-5.github.io/Serpentine/app.html>. Nothing to install.
+**Online:** open <https://serpentine-4qu.pages.dev/app.html>. Nothing to install. Create a free account there to save projects online, end-to-end encrypted.
 
 **macOS:** download, unzip and double-click `Start Serpentine.command`.
 
@@ -69,7 +69,13 @@ To try it without your own data, pick an analysis and press **Try example**.
 
 ## Deployment
 
-There is no build step and no backend. The repository is served as-is by GitHub Pages: `index.html` is the website and `app.html` is the app. Any static host works.
+The main site runs on Cloudflare Pages: the static app plus a small accounts API (`functions/api/`) backed by a D1 database (`schema.sql`). `npm run deploy` copies the site into `dist/` and deploys it; `npm run dev` runs everything locally.
+
+The app also works on any static host without the API (GitHub Pages, the downloadable zip, `python3 -m http.server`); accounts are then simply unavailable and work stays in the browser or in project files.
+
+### How accounts are encrypted
+
+`cloud.js` derives 64 bytes from the password with PBKDF2-SHA256 (600,000 rounds, salted with the email). The first half authenticates (the server stores only a salted SHA-256 of it); the second half never leaves the browser and wraps a random 256-bit data key. Projects and saved styles are gzipped and encrypted with AES-GCM under that data key before upload. The data key is also wrapped with a random recovery key shown once at sign-up, which is the only way to reset a forgotten password.
 
 ## Project structure
 
@@ -106,7 +112,7 @@ python3 -m venv .venv && .venv/bin/pip install numpy scipy pandas matplotlib ope
 
 ## Status
 
-Serpentine is in early development (v0.8). Results should be checked against your own understanding of the statistics before publication; the generated methods text is a starting point, not a substitute for describing what you did.
+Serpentine is in early development (v0.9). Results should be checked against your own understanding of the statistics before publication; the generated methods text is a starting point, not a substitute for describing what you did.
 
 ## Author
 

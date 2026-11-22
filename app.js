@@ -328,6 +328,8 @@ const BOARD_DEFAULTS = { panels: [], cols: 2, width: 7.2, letters: "A", letter_s
 function freshState() {
   return {
     board: clone(BOARD_DEFAULTS),
+    cloudId: null,
+    cloudUpdated: null,
     app: "Serpentine",
     version: 2,
     name: "Untitled analysis",
@@ -352,7 +354,7 @@ const openSections = store(SECTIONS_KEY) || {};
 // Python engine (web worker)
 // ============================================================================
 const servedFromDisk = location.protocol === "file:";
-const worker = servedFromDisk ? null : new Worker("worker.js?v=0.8.0");
+const worker = servedFromDisk ? null : new Worker("worker.js?v=0.9.0");
 let engineReady = false;
 let reqId = 0;
 const pending = new Map();
@@ -497,6 +499,7 @@ let saveTimer = null;
 let autosaveWarned = false;
 function autosave() {
   clearTimeout(saveTimer);
+  if (typeof Cloud !== "undefined") Cloud.changed();
   saveTimer = setTimeout(() => {
     if (!store(STORE_KEY, state) && !autosaveWarned) {
       autosaveWarned = true;
@@ -757,6 +760,8 @@ async function loadExample(kind) {
   if (out.error) return toast(out.error);
   const ex = out.ok;
   state.analysis = kind;
+  state.cloudId = null; // an example never overwrites a project saved online
+  state.cloudUpdated = null;
   state.datasets = [];
   ex.datasets.forEach((d) => newDataset(d.name, d.text, d.meta));
   state.active = state.datasets[0]?.id;
@@ -999,6 +1004,7 @@ function bindForm(panel, getObj, rerender) {
       const mine = store(STYLES_KEY) || [];
       mine.splice(+ds.dataset.delstyle, 1);
       store(STYLES_KEY, mine);
+      if (typeof Cloud !== "undefined") Cloud.stylesChanged();
       return rerender();
     }
     if (t.closest("#btn-save-style")) return saveMyStyle();
@@ -1063,6 +1069,7 @@ function saveMyStyle() {
   const mine = (store(STYLES_KEY) || []).filter((s) => s.name !== name);
   mine.push({ name, v: lookOf(state.style) });
   if (!store(STYLES_KEY, mine)) return toast("Couldn't save in this browser. Use Export style file instead.");
+  if (typeof Cloud !== "undefined") Cloud.stylesChanged();
   renderStyle();
   toast("Saved “" + name + "”");
 }
@@ -1498,7 +1505,7 @@ function renderAnalysis() {
     ${renderChooser()}
     ${groups.length ? groups.map(([name, list]) => `<div class="choice-group"><div class="section-title">${esc(name)}</div><div class="choice-list">${list.map(card).join("")}</div></div>`).join("")
       : `<p class="hint">Nothing matches “${esc(analysisFilter)}”. Try <button type="button" class="link-btn" data-chooser="start">Help me choose</button>.</p>`}
-    <p class="fine">Your data stays on this computer. Serpentine runs Python inside your browser, and nothing is uploaded.</p>`;
+    <p class="fine">Serpentine runs Python inside your browser, so your data stays on this computer. Projects you save to your account are end-to-end encrypted first.</p>`;
   if (focused) {
     const el = $("#analysis-search");
     el.focus();
@@ -1792,9 +1799,31 @@ function copyFigure(index) {
     .catch(() => toast("Your browser blocked copying the image. Use PNG instead."));
 }
 
+// Save: to your account when signed in (end-to-end encrypted), otherwise as a file.
 function saveProject() {
-  download(slug(state.name) + ".serpentine.json", JSON.stringify(state, null, 1), "application/json");
+  if (typeof Cloud !== "undefined" && Cloud.ready()) return Cloud.saveCurrent();
+  downloadProject();
+}
+function downloadProject() {
+  const { cloudId, cloudUpdated, ...rest } = state;
+  download(slug(state.name) + ".serpentine.json", JSON.stringify(rest, null, 1), "application/json");
   toast("Project saved to your downloads");
+}
+// Open a project object (from a file or from your account) as one undoable step
+async function openProjectObject(obj, message) {
+  if (!adopt(obj)) throw new Error("That isn't a Serpentine project.");
+  state.cloudId = null;
+  state.cloudUpdated = null;
+  boardEdit = null;
+  Object.keys(inspected).forEach((k) => delete inspected[k]);
+  await Promise.all(state.datasets.map((d) => inspectNow(d.id)));
+  clearTimeout(history.timer);
+  commitHistory();
+  renderAll();
+  renderBoardCount();
+  autosave();
+  runNow();
+  if (message) toast(message);
 }
 
 // ============================================================================
@@ -2021,7 +2050,7 @@ const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const KEYS = { mod: IS_MAC ? "⌘" : "Ctrl+", shift: IS_MAC ? "⇧" : "Shift+", redo: IS_MAC ? "⇧⌘Z" : "Ctrl+Y" };
 const SHORTCUTS = [
   ["Editing", [[KEYS.mod + "Z", "Undo"], [IS_MAC ? "⇧⌘Z" : "Ctrl+Shift+Z / Ctrl+Y", "Redo"], ["H", "Show the undo history"]]],
-  ["Project", [[KEYS.mod + "S", "Save project"], [KEYS.mod + "O", "Open a project"], [KEYS.mod + "Enter", "Run the analysis again"]]],
+  ["Project", [[KEYS.mod + "S", "Save (to your account when signed in)"], [KEYS.mod + "O", "Open a project"], [KEYS.mod + "Enter", "Run the analysis again"]]],
   ["Moving around", [["1 – 4", "Analysis, Data, Settings, Style"], ["/  or  " + KEYS.mod + "K", "Type a command"], ["Esc", "Close a window, leave a field"]]],
   ["Figures", [[KEYS.mod + "E", "Export the first figure as PNG"], [IS_MAC ? "⇧⌘E" : "Ctrl+Shift+E", "Export it as SVG"], [IS_MAC ? "⇧⌘C" : "Ctrl+Shift+C", "Copy it as an image"], ["B", "Open the figure board"], ["+", "Add the first figure to the board"]]],
   ["Other", [["T", "Switch the app theme"], ["?", "Show these shortcuts"]]],
@@ -2293,15 +2322,7 @@ function bindEvents() {
     e.target.value = "";
     if (!f) return;
     try {
-      if (!adopt(JSON.parse(await f.text()))) throw new Error();
-      Object.keys(inspected).forEach((k) => delete inspected[k]);
-      await Promise.all(state.datasets.map((d) => inspectNow(d.id)));
-      clearTimeout(history.timer);
-      commitHistory(); // opening a project is one undoable step
-      renderAll();
-      autosave();
-      runNow();
-      toast("Opened " + f.name);
+      await openProjectObject(JSON.parse(await f.text()), "Opened " + f.name);
     } catch (err) {
       toast("That file isn't a Serpentine project.");
     }

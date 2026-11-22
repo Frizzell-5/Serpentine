@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
+<script>if (/github\.io$/.test(location.hostname)) location.replace("https://serpentine-4qu.pages.dev/" + location.hash);</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Serpentine</title>
@@ -8,7 +9,7 @@
 <meta name="description" content="Serpentine turns raw lab data into statistics and publication-quality figures without code. Python runs in your browser, so your data never leaves your computer.">
 <meta property="og:title" content="Serpentine">
 <meta property="og:description" content="Statistics and publication-quality figures from raw lab data. No code, nothing uploaded.">
-<meta property="og:image" content="https://frizzell-5.github.io/Serpentine/docs/screenshot.png">
+<meta property="og:image" content="https://serpentine-4qu.pages.dev/docs/screenshot.png">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M21.5 6.5c-5.5 0-11 1.6-11 5.4s11 3.8 11 8.2-5.5 5.4-11 5.4' fill='none' stroke='%23127055' stroke-width='3.2' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='6.5' r='2.9' fill='%23127055'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -247,7 +248,7 @@ footer .sp { margin-left: auto; }
   <!-- Hero -->
   <section class="hero">
     <div class="wrap">
-      <div class="eyebrow rise"><span>v0.8</span><i></i><span>Free</span><i></i><span>Runs in your browser</span></div>
+      <div class="eyebrow rise"><span>v0.9</span><i></i><span>Free</span><i></i><span>Runs in your browser</span></div>
       <h1 class="rise d1">Raw lab data in. <em>Publication figures</em> out.</h1>
       <p class="lede rise d2">Serpentine runs the statistics and draws the figures for you, using the same Python tools behind countless published studies. You choose everything from plain menus and never write a line of code. Your data stays on your computer.</p>
       <div class="cta rise d3">
@@ -270,7 +271,7 @@ footer .sp { margin-left: auto; }
       <div class="stat"><b>10</b><span>plot types, each fully adjustable</span></div>
       <div class="stat"><b>16</b><span>statistical methods</span></div>
       <div class="stat"><b>0</b><span>lines of code to write</span></div>
-      <div class="stat"><b>0&nbsp;KB</b><span>of your data uploaded</span></div>
+      <div class="stat"><b>0&nbsp;KB</b><span>of your data readable by anyone else</span></div>
     </div>
   </div>
 
@@ -514,7 +515,9 @@ footer .sp { margin-left: auto; }
           <a href="#g-stats">How tests are chosen</a>
           <a href="#g-style">Styling figures</a>
           <a href="#g-export">Exporting results</a>
-          <a href="#g-projects">Saving projects</a>
+          <a href="#g-board">Multi-panel figures</a>
+          <a href="#g-projects">Saving projects &amp; accounts</a>
+          <a href="#g-keys">Undo &amp; shortcuts</a>
           <a href="#g-trouble">Troubleshooting</a>
         </nav>
         <div class="doc">
@@ -522,7 +525,8 @@ footer .sp { margin-left: auto; }
             <h3>Getting started</h3>
             <p>Open Serpentine and wait for the status at the top right to read <strong>Python ready</strong>. The app opens with an example loaded so you can see a finished analysis right away.</p>
             <p>The left column has four numbered steps: <strong>Analysis</strong>, <strong>Data</strong>, <strong>Settings</strong> and <strong>Style</strong>. Work through them in order the first time; after that, jump to any step. The right side shows your figures, results and tables, and updates as you go.</p>
-            <div class="callout">Press <strong>Try example</strong> on any analysis to load sample data for it. It's the quickest way to learn what each setting does.</div>
+            <p>Not sure which analysis you need? Type into the search box above the list (for example <em>ELISA</em>, <em>half-life</em> or <em>qPCR</em>), or press <strong>Help me choose</strong> and answer two or three plain questions.</p>
+            <div class="callout">Press <strong>Example</strong> on any analysis to load sample data for it. It's the quickest way to learn what each setting does.</div>
           </article>
 
           <article id="g-analysis">
@@ -640,9 +644,49 @@ M2      KO         29.4
             </ul>
           </article>
 
+          <article id="g-board">
+            <h3>Multi-panel figures</h3>
+            <p>Press <strong>+ Board</strong> above any figure to add it to the figure board, then open <strong>Board</strong> in the top bar. Panels can come from different analyses and different data, so a dose-response curve, a time course and a bar chart can sit together in one figure.</p>
+            <ul>
+              <li>Choose 1 to 4 columns and a journal width: single column (89 mm), 1.5 columns (140 mm), double column (183 mm) or poster.</li>
+              <li>Pick the panel letter style (A, a, A), (a)) and size, and the gap between panels.</li>
+              <li>Reorder panels with the arrows. <strong>Edit</strong> loads a panel's data and settings back into the main window; change anything, then press <strong>Update panel</strong> on the figure.</li>
+              <li>Export the whole figure as PNG or TIFF (300 to 1200 dpi), PDF, or SVG for editing in Illustrator or Inkscape. Each panel is redrawn at full quality.</li>
+            </ul>
+          </article>
+
           <article id="g-projects">
-            <h3>Saving projects</h3>
-            <p>Serpentine keeps your latest work in the browser automatically. To keep it for good, press <strong>Save</strong> (or <kbd>⌘S</kbd> / <kbd>Ctrl+S</kbd>) to download a <code>.serpentine.json</code> file with your data and every setting. <strong>Open</strong> loads it again on any computer.</p>
+            <h3>Saving projects &amp; accounts</h3>
+            <p>Serpentine keeps your latest work in this browser automatically. You can also keep it for good in two ways.</p>
+            <p><strong>As a file.</strong> Without an account, <strong>Save</strong> (<kbd>⌘S</kbd> / <kbd>Ctrl+S</kbd>) downloads a <code>.serpentine.json</code> file with your data and every setting. <strong>Open</strong> loads it again on any computer.</p>
+            <p><strong>In your account.</strong> Press <strong>Sign in</strong> at the top right and create a free account with your email and a password. Then <strong>Save</strong> stores the project online, and every change after that saves automatically; the dot next to your name shows <em>Saved online</em>. Open your projects from any computer under your name in the top bar. Your saved styles go with you too.</p>
+            <div class="callout"><strong>End-to-end encrypted.</strong> Projects are encrypted on your computer with your password before they're uploaded, so the server only ever holds scrambled data that nobody else can read, including whoever runs Serpentine. That's also why nobody can reset your password for you: when you create an account you get a <strong>recovery key</strong>. Download it or write it down. With it, <em>Forgot password?</em> lets you set a new password; without it and your password, your online projects can't be opened.</div>
+            <ul>
+              <li><strong>Two tabs or computers:</strong> if a project changed somewhere else since you opened it, Serpentine asks which version to keep instead of overwriting.</li>
+              <li><strong>Account settings:</strong> change your password, get a new recovery key or delete your account and everything stored online.</li>
+              <li><strong>Signing out</strong> removes online projects from that browser, which is useful on shared lab computers.</li>
+              <li>Online storage is 200 MB per account. Large time-course projects are compressed before they're encrypted.</li>
+            </ul>
+          </article>
+
+          <article id="g-keys">
+            <h3>Undo &amp; shortcuts</h3>
+            <p><strong>Undo</strong> and <strong>Redo</strong> cover everything: settings, styles, data tables, examples, opening projects and the figure board. Undo tells you what it reverted, and the clock button next to Redo lists recent steps so you can go back several at once.</p>
+            <div class="tbl"><table>
+              <thead><tr><th>Keys (Mac / Windows)</th><th>Action</th></tr></thead>
+              <tbody>
+                <tr><td><kbd>⌘Z</kbd> / <kbd>Ctrl+Z</kbd></td><td>Undo</td></tr>
+                <tr><td><kbd>⇧⌘Z</kbd> / <kbd>Ctrl+Y</kbd></td><td>Redo</td></tr>
+                <tr><td><kbd>⌘S</kbd> / <kbd>Ctrl+S</kbd></td><td>Save (online when signed in)</td></tr>
+                <tr><td><kbd>⌘O</kbd> / <kbd>Ctrl+O</kbd></td><td>Open a project file</td></tr>
+                <tr><td><kbd>⌘E</kbd>, <kbd>⇧⌘E</kbd>, <kbd>⇧⌘C</kbd></td><td>Export the first figure as PNG, as SVG, or copy it</td></tr>
+                <tr><td><kbd>/</kbd> or <kbd>⌘K</kbd></td><td>Type a plain-English command</td></tr>
+                <tr><td><kbd>1</kbd> – <kbd>4</kbd></td><td>Go to Analysis, Data, Settings, Style</td></tr>
+                <tr><td><kbd>B</kbd>, <kbd>+</kbd></td><td>Open the figure board, add the figure to it</td></tr>
+                <tr><td><kbd>H</kbd>, <kbd>T</kbd>, <kbd>?</kbd></td><td>Undo history, switch theme, show all shortcuts</td></tr>
+              </tbody>
+            </table></div>
+            <p>Single-letter shortcuts work when you're not typing in a field. While typing, <kbd>⌘Z</kbd> undoes your text as usual.</p>
           </article>
 
           <article id="g-trouble">
@@ -668,7 +712,8 @@ M2      KO         29.4
         <h2>Questions</h2>
       </div>
       <div class="faq">
-        <details><summary>Is my data uploaded anywhere?</summary><p>No. Serpentine downloads the Python engine to your browser, and all parsing, statistics and drawing happen on your computer. Your tables are never sent to a server. Your latest project is kept in your browser's local storage so it's there when you come back.</p></details>
+        <details><summary>Is my data uploaded anywhere?</summary><p>Not unless you choose to. All parsing, statistics and drawing happen on your computer, and your latest project is kept in your browser's local storage. If you create an account and save projects online, they are encrypted on your computer with your password first (end-to-end encryption), so the server stores only scrambled data that no one else can read, including whoever runs Serpentine.</p></details>
+        <details><summary>I forgot my password. Can you reset it?</summary><p>Because projects are end-to-end encrypted, nobody can reset it for you. Use <em>Forgot password?</em> with the recovery key you saved when you created the account. Without the recovery key and the password, online projects can't be opened; copies saved as files are unaffected.</p></details>
         <details><summary>Is it free?</summary><p>Yes. Serpentine is free to use, online or downloaded.</p></details>
         <details><summary>Can I trust the statistics?</summary><p>Serpentine uses SciPy, the standard open scientific library behind much of published research, for every test, and it reports exactly which test was used. You can also download the Python script and check every step. As with any software, choose an analysis that matches your experimental design.</p></details>
         <details><summary>Will my figures look like everyone else's?</summary><p>Only if you want them to. Every visual property is a setting, from fonts and axis lines to per-group markers and hatch patterns, and the optional Python box lets you do anything matplotlib can. Save your look as a style so your figures stay recognisably yours.</p></details>
@@ -692,7 +737,7 @@ M2      KO         29.4
 
 <footer>
   <div class="wrap">
-    <span><b style="color:var(--ink)">Serpentine</b> v0.8 · Made by Shadan Alrawi</span>
+    <span><b style="color:var(--ink)">Serpentine</b> v0.9 · Made by Shadan Alrawi</span>
     <a href="https://github.com/Frizzell-5/Serpentine">GitHub</a>
     <a href="https://github.com/Frizzell-5/Serpentine/issues">Report an issue</a>
     <span class="sp">Built on Pyodide, NumPy, SciPy, pandas and matplotlib.</span>
