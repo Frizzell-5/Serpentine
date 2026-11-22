@@ -2,7 +2,7 @@
 
 **Analyze lab data and make publication-quality figures without writing code.**
 
-**[Open Serpentine](https://serpentine-4qu.pages.dev/app.html)** · [Website & guide](https://serpentine-4qu.pages.dev/) · [Download](https://github.com/Frizzell-5/Serpentine/releases/latest/download/Serpentine.zip)
+**[Open Serpentine](https://serpentine.shawi.space/app.html)** · [Website & guide](https://serpentine.shawi.space/) · [Download](https://github.com/Frizzell-5/Serpentine/releases/latest/download/Serpentine.zip)
 
 Serpentine is a browser-based analysis tool for researchers. You paste or upload your data, choose an analysis, adjust the settings and figure style in plain menus, and get statistics, figures and a methods paragraph. Python (NumPy, SciPy, pandas, matplotlib) does the work behind the scenes, right inside the browser, so there is nothing to install and your data never leaves your computer.
 
@@ -56,7 +56,7 @@ Compare groups can also flag or remove outliers (Grubbs' test or Tukey's fences)
 
 Serpentine is a static web app. It needs to be served over HTTP (not opened as a file) because the Python engine runs in a web worker.
 
-**Online:** open <https://serpentine-4qu.pages.dev/app.html>. Nothing to install. Create a free account there to save projects online, end-to-end encrypted.
+**Online:** open <https://serpentine.shawi.space/app.html>. Nothing to install. Create a free account there to save projects online, end-to-end encrypted.
 
 **macOS:** download, unzip and double-click `Start Serpentine.command`.
 

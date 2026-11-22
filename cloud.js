@@ -11,7 +11,7 @@
 "use strict";
 
 const Cloud = (() => {
-  const MAIN_SITE = "https://serpentine-4qu.pages.dev";
+  const MAIN_SITE = "https://serpentine.shawi.space";
   const KDF_ROUNDS = 600000;
   const te = new TextEncoder();
   const td = new TextDecoder();
@@ -249,6 +249,13 @@ const Cloud = (() => {
         document.body.prepend(bar);
       }
       return renderButton();
+    }
+    if (/\.pages\.dev$/.test(location.hostname) && !store("serpentine.moved2.v1")) {
+      const bar = document.createElement("div");
+      bar.className = "moved-bar";
+      bar.innerHTML = `Serpentine now lives at <a href="${MAIN_SITE}/app.html">${MAIN_SITE.replace("https://", "")}</a>. Your account and online projects work there too. Work kept only in this browser stays here: save it to your account or as a file to take it along. <button type="button" class="link-btn">Dismiss</button>`;
+      bar.querySelector("button").onclick = () => { store("serpentine.moved2.v1", true); bar.remove(); };
+      document.body.prepend(bar);
     }
     try {
       const r = await api("me");
