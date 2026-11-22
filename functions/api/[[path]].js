@@ -10,6 +10,9 @@ const MAX_USER_BYTES = 200 * 1024 * 1024;
 const MAX_ITEMS = 1000;
 const CHUNK = 900 * 1024; // D1 rows top out at 2 MB
 const KINDS = new Set(["project", "styles"]);
+const MAX_SHARE_BYTES = 25 * 1024 * 1024;
+const MAX_SHARES = 200;
+const SHARE_DAYS = new Set([1, 7, 30, 90, 365]);
 
 const enc = new TextEncoder();
 const b64 = {
@@ -198,6 +201,25 @@ async function route(request, env, path) {
   }
 
   // Everything below needs a session
+  // Shared links: anyone with the link can fetch the ciphertext; the key lives only in the link's #fragment,
+  // which browsers never send to the server.
+  const sm = path.match(/^share\/([0-9a-f]{32})$/);
+  if (sm && method === "GET") {
+    if (await tooMany(env, ["share404:" + ip], 60, 3600000)) throw new HttpError(429, "Too many requests. Try again later.");
+    const sh = await env.DB.prepare("SELECT * FROM shares WHERE id = ? AND expires_at > ?").bind(sm[1], Date.now()).first();
+    if (!sh) {
+      await noteFailure(env, ["share404:" + ip]);
+      throw new HttpError(404, "This link has expired or was removed by the person who shared it.");
+    }
+    const rows = (await env.DB.prepare("SELECT data FROM share_chunks WHERE share_id = ? ORDER BY idx").bind(sh.id).all()).results;
+    const parts = rows.map((r) => new Uint8Array(r.data));
+    const all = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let o = 0;
+    for (const p of parts) { all.set(p, o); o += p.length; }
+    await env.DB.prepare("UPDATE shares SET views = views + 1 WHERE id = ?").bind(sh.id).run();
+    return json({ data: b64.encode(all), created_at: sh.created_at, expires_at: sh.expires_at });
+  }
+
   const user = await requireUser(env, request);
 
   if (path === "password" && method === "POST") {
@@ -223,6 +245,8 @@ async function route(request, env, path) {
     if (!(await checkAuth(user, body.auth))) throw new HttpError(401, "Your password is wrong.");
     await env.DB.batch([
       env.DB.prepare("DELETE FROM chunks WHERE user_id = ?").bind(user.id),
+      env.DB.prepare("DELETE FROM share_chunks WHERE share_id IN (SELECT id FROM shares WHERE user_id = ?)").bind(user.id),
+      env.DB.prepare("DELETE FROM shares WHERE user_id = ?").bind(user.id),
       env.DB.prepare("DELETE FROM items WHERE user_id = ?").bind(user.id),
       env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(user.id),
       env.DB.prepare("DELETE FROM users WHERE id = ?").bind(user.id),
@@ -236,6 +260,47 @@ async function route(request, env, path) {
       ? env.DB.prepare("SELECT id, kind, meta, size, updated_at FROM items WHERE user_id = ? AND kind = ? ORDER BY updated_at DESC").bind(user.id, kind)
       : env.DB.prepare("SELECT id, kind, meta, size, updated_at FROM items WHERE user_id = ? ORDER BY updated_at DESC").bind(user.id);
     return json({ items: (await q.all()).results, usage: await usage(env, user.id) });
+  }
+
+  if (path === "shares" && method === "GET") {
+    const rows = (await env.DB.prepare("SELECT id, size, created_at, expires_at, views FROM shares WHERE user_id = ? AND expires_at > ? ORDER BY created_at DESC")
+      .bind(user.id, Date.now()).all()).results;
+    return json({ shares: rows });
+  }
+  if (path === "shares" && method === "POST") {
+    if (typeof body.data !== "string") throw new HttpError(400, "Missing data.");
+    const days = SHARE_DAYS.has(Number(body.days)) ? Number(body.days) : 30;
+    const data = b64.decode(body.data);
+    if (data.length > MAX_SHARE_BYTES) throw new HttpError(413, "This project is too large to share (over 25 MB, even compressed).");
+    if (await tooMany(env, ["share:" + user.id], 100, 86400000)) throw new HttpError(429, "You've made a lot of links today. Try again tomorrow.");
+    const now = Date.now();
+    const active = await env.DB.prepare("SELECT COUNT(*) AS n FROM shares WHERE user_id = ? AND expires_at > ?").bind(user.id, now).first();
+    if (active.n >= MAX_SHARES) throw new HttpError(413, "You have 200 active links. Remove some in Share → Your links first.");
+    if (Math.random() < 0.1) {
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM share_chunks WHERE share_id IN (SELECT id FROM shares WHERE expires_at < ?)").bind(now),
+        env.DB.prepare("DELETE FROM shares WHERE expires_at < ?").bind(now),
+      ]);
+    }
+    const id = randomHex(16);
+    const n = Math.max(1, Math.ceil(data.length / CHUNK));
+    const expires = now + days * 86400000;
+    const stmts = [env.DB.prepare("INSERT INTO shares (id, user_id, size, chunks, created_at, expires_at, views) VALUES (?, ?, ?, ?, ?, ?, 0)")
+      .bind(id, user.id, data.length, n, now, expires)];
+    for (let i = 0; i < n; i++) stmts.push(env.DB.prepare("INSERT INTO share_chunks (share_id, idx, data) VALUES (?, ?, ?)").bind(id, i, data.subarray(i * CHUNK, (i + 1) * CHUNK)));
+    await env.DB.batch(stmts);
+    await noteFailure(env, ["share:" + user.id]); // counts toward the daily limit
+    return json({ id, created_at: now, expires_at: expires });
+  }
+  const dm = path.match(/^shares\/([0-9a-f]{32})$/);
+  if (dm && method === "DELETE") {
+    const own = await env.DB.prepare("SELECT id FROM shares WHERE id = ? AND user_id = ?").bind(dm[1], user.id).first();
+    if (!own) throw new HttpError(404, "Link not found.");
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM share_chunks WHERE share_id = ?").bind(dm[1]),
+      env.DB.prepare("DELETE FROM shares WHERE id = ?").bind(dm[1]),
+    ]);
+    return json({ ok: true });
   }
 
   const m = path.match(/^items\/([A-Za-z0-9_-]{1,64})$/);

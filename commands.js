@@ -524,6 +524,29 @@
           else if (/\bstacked\b.*\b(counts?|numbers)\b|\b(counts?|numbers)\b.*\bstacked\b/.test(c)) { settings.display = "stacked"; say("Stacked counts"); }
           else if (/\bstacked\b|\b(percent|%)\b.*\bbars?\b/.test(c)) { settings.display = "stacked_pct"; say("Stacked percentages"); }
           if (/\b(percent(age)?s?|numbers|labels) (in|on) (the )?(bars|segments)\b/.test(c)) { settings.labels = !NEG.test(c); say(settings.labels ? "Numbers in the bars" : "No numbers in the bars"); }
+        } else if (ctx.analysis === "repeated") {
+          if (/\b(each|every|individual) (subject|animal|mouse|patient|trajectory|line)s?\b|\bspaghetti\b/.test(c)) { settings.show_subjects = !NEG.test(c); say(settings.show_subjects ? "Each subject shown" : "Individual subjects hidden"); }
+          if (/\b(grouped )?bars?\b|\bbar (chart|plot|graph)\b/.test(c) && !/\berror\b/.test(c)) { settings.plot = NEG.test(c) ? "lines" : "bars"; say(settings.plot === "bars" ? "Grouped bars" : "Lines over time"); }
+          else if (/\blines?( plot| chart| graph)?\b.*\btime\b|\bline (plot|chart|graph)\b/.test(c)) { settings.plot = "lines"; say("Lines over time"); }
+          if (/\b(time ?points?|times|weeks|days|visits) within each (group|diet|genotype|treatment)\b|\bcompare (the )?(time ?points?|weeks|days|visits)\b/.test(c)) { settings.posthoc = "along_x"; say("Time points compared within each group"); }
+          else if (/\b(groups?|diets?|genotypes?|treatments?) at each (time ?point|time|week|day|visit)\b|\bcompare (the )?groups\b/.test(c)) { settings.posthoc = "at_x"; say("Groups compared at each time point"); }
+          else if (/\b(all|every) (pairs?|combinations|comparisons)\b/.test(c)) { settings.posthoc = "all"; say("Every combination compared"); }
+          else if (/\bno (post[- ]?hoc|comparisons|stars)\b/.test(c)) { settings.posthoc = "none"; say("No post-hoc comparisons"); }
+          if (/\b(sphericity|greenhouse|geisser)\b/.test(c)) { settings.sphericity = /\bno\b|\bassume\b|\bwithout\b|\boff\b/.test(c) ? "none" : "gg"; say(settings.sphericity === "gg" ? "Greenhouse-Geisser correction" : "Sphericity assumed"); }
+          if (/\b(log|log10) ?transform/.test(c) && !NEG.test(c)) { settings.transform = "log10"; say("Values log10-transformed"); }
+        } else if (ctx.analysis === "roc") {
+          if (/\blower (values?|is|are|means?)\b.*\b(positive|disease|worse|abnormal)\b|\blow (values?|levels?) (are|is|mean) (positive|abnormal|bad)\b/.test(c)) { settings.direction = "lower"; say("Lower values mean positive"); }
+          else if (/\bhigher (values?|is|are|means?)\b.*\b(positive|disease|worse|abnormal)\b/.test(c)) { settings.direction = "higher"; say("Higher values mean positive"); }
+          if (/\bcut[- ]?off|\byouden\b|\bthreshold\b/.test(c)) { settings.show_cutoff = !NEG.test(c); say(settings.show_cutoff ? "Best cut-off marked" : "Cut-off mark hidden"); }
+          if (/\bsteps?\b|\bstaircase\b/.test(c)) { settings.steps = !NEG.test(c); say(settings.steps ? "Drawn as steps" : "Drawn as lines"); }
+          if (/\b(distribution|marker|dot) (plot|figure|chart)\b|\bsecond (plot|figure)\b/.test(c)) { settings.show_dist = !NEG.test(c); say(settings.show_dist ? "Marker plot shown" : "Marker plot hidden"); }
+        } else if (ctx.analysis === "agreement") {
+          if (/\bpercent(age)? (difference|diff)s?\b|\b% (of (the )?mean|difference)\b/.test(c)) { settings.mode = "pct"; say("Differences as % of the mean"); }
+          else if (/\bratios?\b|\blog scale\b/.test(c)) { settings.mode = NEG.test(c) ? "diff" : "ratio"; say(settings.mode === "ratio" ? "Ratios" : "Absolute differences"); }
+          else if (/\babsolute (difference|diff)s?\b|\braw differences\b/.test(c)) { settings.mode = "diff"; say("Absolute differences"); }
+          if (/\btrend( line)?\b|\bregression line\b|\bproportional bias\b/.test(c)) { settings.show_trend = !NEG.test(c); say(settings.show_trend ? "Trend line shown" : "Trend line hidden"); }
+          if (/\bscatter( plot)?\b|\bagreement plot\b|\bidentity line\b/.test(c)) { settings.show_scatter = !NEG.test(c); say(settings.show_scatter ? "Scatter plot shown" : "Scatter plot hidden"); }
+          if (/\b(confidence|ci) (bands?|intervals?|shading)\b|\bshading\b/.test(c)) { settings.show_ci = !NEG.test(c); say(settings.show_ci ? "Confidence intervals shaded" : "Confidence shading hidden"); }
         } else if (ctx.analysis === "power") {
           if ((m = c.match(/\b(\d+(?:\.\d+)?)\s*%?\s*power\b/)) || (m = c.match(/\bpower (?:of |=|to |at )?(\d+(?:\.\d+)?)\s*%?/))) { const v = parseFloat(m[1]); settings.power = v > 1 ? v / 100 : v; say(`Power ${Math.round(settings.power * 100)}%`); }
           if ((m = c.match(/\balpha (?:of |=|to |at )?(0?\.\d+)/)) || (m = c.match(/\b(?:p|significance)(?: level)? (?:<|of|=|at) ?(0?\.\d+)/))) { settings.alpha = parseFloat(m[1]); say("Alpha " + settings.alpha); }

@@ -32,9 +32,14 @@ Serpentine is a browser-based analysis tool for researchers. You paste or upload
 | **Curve fitting** | 16 models (Michaelis-Menten, Hill and one-site binding, one/two-phase decay and association, exponential, logistic and Gompertz growth, Boltzmann, Gaussian, power, polynomials) or a custom equation. Parameter CIs, R², AICc, derived half-lives and doubling times, weighting, confidence bands, residual plots with a runs test, and extra sum-of-squares F tests comparing curves or a single parameter. |
 | **Standard curve** | ELISA, BCA, Bradford or any assay: linear, through-origin, quadratic, log-log, 4PL or 5PL fits with optional 1/Y or 1/Y² weighting; blank subtraction; interpolated unknowns with dilution factors; flags for out-of-range samples and high replicate CV; back-calculated standard recovery; LOD/LOQ from blanks. |
 | **qPCR gene expression** | Ct to fold change by 2^-ΔΔCt or Pfaffl (gene-specific efficiencies); automatic reference-gene detection and geometric averaging of several; technical-replicate QC; Undetermined wells; reference-gene stability check; statistics on log2 fold change. Reads instrument exports directly. |
+| **Repeated measures** | The same subjects measured repeatedly, in one or more groups. Mixed-design or two-way repeated-measures ANOVA (design detected from subject IDs), Greenhouse-Geisser sphericity correction, paired post-hoc tests with Šidák or Holm correction, line plots over time with significance per time point. Validated against pingouin. |
+| **ROC curve** | Diagnostic accuracy of one or more markers: AUC with DeLong 95% CI, Youden-optimal cut-off with sensitivity, specificity, PPV and NPV, paired DeLong test between markers, full cut-off table. |
+| **Method comparison** | Bland-Altman bias and 95% limits of agreement with confidence intervals (absolute, percent or ratio differences), proportional-bias check, Lin's concordance correlation coefficient and an agreement scatter plot. |
 | **Sample size & power** | No data needed. Required n, achieved power or minimum detectable effect for two groups, paired designs, one-way ANOVA, two proportions and correlations (exact noncentral t/F), with dropout and a methods-ready justification. |
 
-Compare groups can also flag or remove outliers (Grubbs' test or Tukey's fences), and its descriptive table includes the CV.
+Compare groups can also flag or remove outliers (Grubbs' test or Tukey's fences), average technical replicates within each subject before testing (nested designs, no pseudoreplication), and its descriptive table includes the CV. Two-way ANOVA takes an optional subject column for repeated measures.
+
+**Plate reader import:** paste a 96- or 384-well grid and a plate map; standards, blanks and replicates are recognized, previewed on a live plate, and turned into a table that goes straight into a standard curve.
 
 ## Output
 
@@ -44,6 +49,8 @@ Compare groups can also flag or remove outliers (Grubbs' test or Tukey's fences)
 - A **Python script** that reproduces the full analysis
 - Project files (`.serpentine.json`) to save and reopen your work
 - **Figure board:** combine figures from any analyses into one multi-panel figure at journal widths, lettered A, B, C, exported as PNG, TIFF, PDF or editable SVG
+- **Report:** results, notes, figures, methods and tables on one printable page
+- **Share links:** a link that opens a copy of the whole analysis in anyone's browser, encrypted with a key that exists only in the link (the server can't read it)
 
 ## Getting started
 
@@ -77,6 +84,8 @@ The app also works on any static host without the API (GitHub Pages, the downloa
 
 `cloud.js` derives 64 bytes from the password with PBKDF2-SHA256 (600,000 rounds, salted with the email). The first half authenticates (the server stores only a salted SHA-256 of it); the second half never leaves the browser and wraps a random 256-bit data key. Projects and saved styles are gzipped and encrypted with AES-GCM under that data key before upload. The data key is also wrapped with a random recovery key shown once at sign-up, which is the only way to reset a forgotten password.
 
+Share links use a fresh random 256-bit AES-GCM key per link. The encrypted project is uploaded; the key is put only in the link's `#fragment`, which browsers never send to the server. Links expire after 1 to 365 days and can be removed by their creator at any time.
+
 ## Project structure
 
 ```
@@ -85,6 +94,10 @@ app.html            The app
 app.css             Styles (light and dark themes)
 app.js              Interface: steps, settings forms, results, exports
 commands.js         Plain-English command reader ("remove gridlines" → settings)
+cloud.js            Accounts, end-to-end encryption, online saving, share links
+plate.js            Plate-reader import
+functions/api/      Accounts and share-link API (Cloudflare Pages Functions + D1)
+schema.sql          Database tables
 worker.js           Loads Pyodide and the engine off the main thread
 engine/serpentine.py   Analysis engine: parsing, statistics, figures, exports
 docs/               Screenshots
@@ -106,13 +119,13 @@ python3 -m venv .venv && .venv/bin/pip install numpy scipy pandas matplotlib ope
 
 ## Roadmap
 
-- Repeated-measures and mixed-model two-way ANOVA
+- Linear mixed models for unbalanced repeated measures
 - Axis breaks and inset plots
 - Direct import of LabChart `.adicht` files
 
 ## Status
 
-Serpentine is in early development (v0.9). Results should be checked against your own understanding of the statistics before publication; the generated methods text is a starting point, not a substitute for describing what you did.
+Serpentine is at v1.0. Results should be checked against your own understanding of the statistics before publication; the generated methods text is a starting point, not a substitute for describing what you did.
 
 ## Author
 

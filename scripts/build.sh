@@ -4,7 +4,7 @@ set -e
 cd "$(dirname "$0")/.."
 rm -rf dist
 mkdir -p dist/engine dist/docs
-cp index.html app.html app.css app.js commands.js cloud.js worker.js dist/
+cp index.html app.html app.css app.js commands.js cloud.js plate.js worker.js dist/
 cp engine/serpentine.py dist/engine/
 cp -R docs/img dist/docs/img
 cp docs/screenshot.png dist/docs/ 2>/dev/null || true

@@ -108,7 +108,7 @@ function armConfirm(btn, question, action) {
 // Defaults
 // ============================================================================
 const DEFAULT_SETTINGS = {
-  compare: { dataset: "", layout: "wide", columns: [], value_col: "", group_col: "", group_order: "", y_name: "", normalize: "none", combine_headings: true, paired: false, test: "auto", equal_var: false, posthoc: "all", outliers: "keep", outlier_method: "grubbs" },
+  compare: { dataset: "", layout: "wide", columns: [], value_col: "", group_col: "", subject_col: "", group_order: "", y_name: "", normalize: "none", combine_headings: true, paired: false, test: "auto", equal_var: false, posthoc: "all", outliers: "keep", outlier_method: "grubbs" },
   timecourse: {
     time_col: "", time_unit: "seconds", value_col: "", valid_min: "", valid_max: "", filter_col: "", filter_min: "", filter_max: "",
     bin: 30, baseline_start: -5, baseline_end: 0, window_start: -10, window_end: 30, event_label: "Injection", norm: "pct",
@@ -118,18 +118,21 @@ const DEFAULT_SETTINGS = {
   correlation: { dataset: "", x_col: "", y_col: "", group_col: "", group_order: "", method: "pearson", fit: true, ci: true, annotate: true },
   dose: { dataset: "", x_col: "", x_unit: "", x_scale: 1, mode: "curves", y_cols: [], curve_name: "Response", fix_bottom: "", fix_top: "", show_ec50: true, all_points: false, ec_label: "" },
   survival: { dataset: "", time_col: "", event_col: "", group_col: "", group_order: "", time_unit: "", y_scale: "pct", show_ci: true, show_censors: true, show_median: false, at_risk: false },
-  twoway: { dataset: "", layout: "long", a_col: "", b_col: "", value_col: "", row_col: "", a_order: "", b_order: "", a_name: "", b_name: "", y_name: "", transform: "none", posthoc: "within_a" },
+  twoway: { dataset: "", layout: "long", a_col: "", b_col: "", value_col: "", subject_col: "", sphericity: "gg", row_col: "", a_order: "", b_order: "", a_name: "", b_name: "", y_name: "", transform: "none", posthoc: "within_a" },
   qpcr: { dataset: "", layout: "long", sample_col: "", group_col: "", gene_col: "", ct_col: "", gene_cols: [], ref_genes: [], targets: [], control_group: "", group_order: "", efficiency: "", output: "fold", test: "param", equal_var: false, posthoc: "control", max_ct: 35, rep_sd: 0.5 },
   stdcurve: { dataset: "", conc_col: "", signal_cols: [], name_col: "", dilution_col: "", dilution: 1, unit: "", model: "4pl", weight: "none", blank: "none", show_unknowns: true, guides: true, annotate: true, x_name: "", y_name: "" },
   curvefit: { dataset: "", layout: "wide", x_col: "", y_cols: [], y_col: "", group_col: "", group_order: "", mode: "curves", curve_name: "Data", model: "mm", equation: "", initial: "", weight: "none", band: false, residuals: false, compare: "", all_points: false, extend: 0, annotate: true, x_name: "", y_name: "" },
   contingency: { dataset: "", layout: "counts", row_col: "", col_col: "", count_cols: [], row_order: "", col_order: "", test: "auto", yates: false, display: "stacked_pct", labels: true, annotate: true },
+  repeated: { dataset: "", a_col: "", b_col: "", value_col: "", subject_col: "", a_order: "", b_order: "", a_name: "", b_name: "", y_name: "", transform: "none", sphericity: "gg", posthoc: "at_x", plot: "lines", show_subjects: false },
+  roc: { dataset: "", outcome_col: "", positive: "", marker_cols: [], direction: "auto", show_cutoff: true, show_dist: true, steps: false },
+  agreement: { dataset: "", a_col: "", b_col: "", mode: "diff", show_ci: true, show_trend: false, show_scatter: true, x_name: "", y_name: "" },
   power: { design: "two", entry: "raw", solve: "n", mean1: 100, mean2: 80, sd: 15, effect: 0.8, means: "10, 12, 15", k: 3, p1: 0.3, p2: 0.1, r: 0.5, unit: "", alpha: 0.05, power: 0.8, sides: "two", ratio: 1, dropout: 0, n: 10 },
 };
 // Analyses that need no data table (they run from the numbers in Settings).
 const NO_DATA = new Set(["power"]);
 // Analyses drawn as one category per group (plot type, significance marks), and as lines/curves.
 const GROUP_PLOTS = new Set(["compare", "timecourse", "twoway", "qpcr"]);
-const LINE_PLOTS = new Set(["timecourse", "dose", "correlation", "survival", "curvefit", "stdcurve", "power"]);
+const LINE_PLOTS = new Set(["timecourse", "dose", "correlation", "survival", "curvefit", "stdcurve", "power", "repeated", "roc"]);
 const LEGEND_PLOTS = new Set([...LINE_PLOTS, "twoway", "qpcr", "contingency"]);
 // Parameter names of each curve-fit model (mirrors FIT_MODELS in the engine).
 const FIT_MODELS = [
@@ -276,6 +279,15 @@ const ANALYSES = [
     icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45M4 37V3"/><path d="M6 8c10 0 13 1 18 12s9 12 22 12" stroke-linejoin="round"/><path d="M24 20v17" stroke-dasharray="2.5 2.5" stroke-width="1.4"/></svg>' },
   { id: "twoway", title: "Two-way ANOVA", desc: "Two factors at once, like genotype × treatment. Main effects, interaction and Šidák or Tukey comparisons on a grouped plot.",
     icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45"/><rect x="7" y="12" width="7" height="25" rx="1" fill="currentColor" fill-opacity=".18"/><rect x="15" y="18" width="7" height="19" rx="1" fill="currentColor" fill-opacity=".45"/><rect x="29" y="24" width="7" height="13" rx="1" fill="currentColor" fill-opacity=".18"/><rect x="37" y="9" width="7" height="28" rx="1" fill="currentColor" fill-opacity=".45"/></svg>' },
+  { id: "repeated", title: "Repeated measures", tags: "rm anova mixed within subjects longitudinal weekly body weight growth sphericity greenhouse",
+    desc: "The same animals or patients measured again and again, in one or more groups. Mixed or repeated-measures ANOVA with sphericity correction.",
+    icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45M4 37V3"/><path d="M8 28l9-3 9-6 9-5 9-6" stroke-linejoin="round"/><path d="M8 30l9-1 9-2 9 0 9-2" stroke-linejoin="round" stroke-dasharray="3 2.5"/><g fill="currentColor" stroke="none"><circle cx="8" cy="28" r="2.2"/><circle cx="17" cy="25" r="2.2"/><circle cx="26" cy="19" r="2.2"/><circle cx="35" cy="14" r="2.2"/><circle cx="44" cy="8" r="2.2"/></g></svg>' },
+  { id: "roc", title: "ROC curve (diagnostic test)", tags: "auc biomarker sensitivity specificity cutoff cut-off youden delong diagnosis screening classifier",
+    desc: "How well a marker separates patients from controls. AUC with confidence interval, best cut-off, sensitivity and specificity, and comparison of two markers.",
+    icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45M4 37V3"/><path d="M5 36L47 4" stroke-width="1.2" stroke-dasharray="2.5 2.5"/><path d="M5 36V18h4v-6h6V8h8V6h24" stroke-linejoin="round"/><circle cx="15" cy="10" r="2.6" fill="currentColor"/></svg>' },
+  { id: "agreement", title: "Method comparison", tags: "bland altman agreement bias limits of agreement concordance lin ccc new assay validation instrument",
+    desc: "Do two methods or instruments give the same result? Bland-Altman bias and limits of agreement, plus Lin's concordance.",
+    icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45M4 37V3"/><path d="M4 20h45" stroke-width="1.8"/><path d="M4 9h45M4 31h45" stroke-width="1.2" stroke-dasharray="3 2.5"/><g fill="currentColor" stroke="none"><circle cx="11" cy="17" r="2.2"/><circle cx="18" cy="24" r="2.2"/><circle cx="25" cy="14" r="2.2"/><circle cx="32" cy="22" r="2.2"/><circle cx="39" cy="18" r="2.2"/><circle cx="44" cy="26" r="2.2"/></g></svg>' },
   { id: "contingency", title: "Counts & proportions", desc: "How many responded, survived or got sick in each group. Chi-square or Fisher's exact test, odds ratio and relative risk.",
     icon: '<svg viewBox="0 0 52 40" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 37h45"/><rect x="10" y="5" width="11" height="32" rx="1"/><rect x="10" y="26" width="11" height="11" fill="currentColor" fill-opacity=".45"/><rect x="30" y="5" width="11" height="32" rx="1"/><rect x="30" y="15" width="11" height="22" fill="currentColor" fill-opacity=".45"/></svg>' },
   { id: "curvefit", title: "Curve fitting", desc: "Michaelis-Menten, exponential decay, growth curves, binding, Boltzmann or your own equation. Compare curves with an F test.",
@@ -289,9 +301,10 @@ const ANALYSES = [
 ];
 const ANALYSIS_GROUPS = [
   ["Compare", ["compare", "twoway", "contingency"]],
-  ["Over time", ["timecourse", "survival"]],
+  ["Over time", ["repeated", "timecourse", "survival"]],
   ["Curves & relationships", ["correlation", "curvefit", "dose"]],
   ["Assays", ["stdcurve", "qpcr"]],
+  ["Diagnostics & methods", ["roc", "agreement"]],
   ["Plan", ["power"]],
 ];
 // "Help me choose": a short decision tree that ends at an analysis.
@@ -302,6 +315,7 @@ const CHOOSER = {
     ["How two things are related", "Correlation, curve fitting, EC50", "relate"],
     ["The concentration of my samples", "ELISA, BCA, Bradford, any standard curve", "=stdcurve"],
     ["Gene expression from qPCR", "Ct values to fold change", "=qpcr"],
+    ["How good a test or method is", "Biomarker accuracy, comparing two instruments", "diag"],
     ["How many subjects I need", "For a protocol, grant or study plan", "=power"],
   ] },
   groups: { q: "What did you measure in each subject?", o: [
@@ -311,8 +325,14 @@ const CHOOSER = {
   factors: { q: "How many things did you vary?", o: [
     ["One", "Several doses, or control vs treated", "=compare"],
     ["Two at once", "Genotype × treatment, sex × diet", "=twoway"],
+    ["Measured the same subjects repeatedly", "Weekly weights, before/during/after in each group", "=repeated"],
+  ] },
+  diag: { q: "Which describes your question?", o: [
+    ["Does a marker tell patients from controls?", "AUC, sensitivity, specificity, best cut-off", "=roc"],
+    ["Do two methods give the same numbers?", "New assay vs reference, handheld vs lab analyzer", "=agreement"],
   ] },
   time: { q: "Which describes your data?", o: [
+    ["The same subjects measured at set times", "Weekly body weight, tumor size on days 0–21", "=repeated"],
     ["Recordings around an event", "Heart rate before and after an injection", "=timecourse"],
     ["Time until something happens", "Death, relapse, a seizure", "=survival"],
     ["A growth or decay curve", "Bacterial growth, drug clearance, half-life", "=curvefit"],
@@ -354,7 +374,7 @@ const openSections = store(SECTIONS_KEY) || {};
 // Python engine (web worker)
 // ============================================================================
 const servedFromDisk = location.protocol === "file:";
-const worker = servedFromDisk ? null : new Worker("worker.js?v=0.9.0");
+const worker = servedFromDisk ? null : new Worker("worker.js?v=1.0.0");
 let engineReady = false;
 let reqId = 0;
 const pending = new Map();
@@ -1108,6 +1128,7 @@ const SETTINGS_SCHEMA = {
       s.layout !== "long" && cols("columns", "Groups to include", c.numeric, "Leave all unchecked to use every numeric column."),
       s.layout !== "long" && c.numeric.some((n) => n.includes(" · ")) && tog("combine_headings", "Combine columns under the same heading", "For Prism-style tables where each group has several replicate columns."),
       s.layout === "long" && row(col("value_col", "Value column", c.numeric), col("group_col", "Group column", c.all)),
+      s.layout === "long" && col("subject_col", "Replicates nested in", c.all, { none: true, hint: "If each animal, culture or well was measured several times, pick its ID column. Replicates are averaged per subject so the statistics count biological replicates (no pseudoreplication)." }),
       txt("group_order", "Group order", { placeholder: "e.g. Control, Low, High", hint: "Optional. Groups you leave out keep their table order." }),
       txt("y_name", "Measurement name", { placeholder: "e.g. Tumor volume (mm³)", hint: "Becomes the value-axis label." }),
       sel("normalize", "Express values as", [["none", "As entered"], ["pct_control", "% of the first group's mean"], ["fold_control", "Fold of the first group's mean"], ["delta_control", "Difference from the first group's mean"]], { hint: "The first group (see Group order) is treated as the control." }),
@@ -1218,6 +1239,7 @@ const SETTINGS_SCHEMA = {
         : note("Three columns: the first factor, the second factor and the measurement."),
       s.layout !== "grouped" && row(col("a_col", "First factor (x-axis)", c.all), col("b_col", "Second factor (colors)", c.all)),
       s.layout !== "grouped" && col("value_col", "Measurement", c.numeric),
+      s.layout !== "grouped" && col("subject_col", "Subject column (repeated measures)", c.all, { none: true, hint: "If the same animals or patients appear in several combinations, pick their ID column for a repeated-measures or mixed ANOVA." }),
       s.layout === "grouped" && col("row_col", "Row labels column", c.all),
       row(txt("a_order", "First factor order", { placeholder: "e.g. WT, KO" }), txt("b_order", "Second factor order", { placeholder: "e.g. Vehicle, Drug" })),
       row(txt("a_name", "First factor name", { placeholder: "automatic" }), txt("b_name", "Second factor name", { placeholder: "automatic" })),
@@ -1225,7 +1247,63 @@ const SETTINGS_SCHEMA = {
       sec("Statistics"),
       sel("transform", "Transform values first", [["none", "No transform"], ["log10", "log10 (for skewed, positive data)"], ["log2", "log2"], ["sqrt", "Square root (counts)"]]),
       sel("posthoc", "Multiple comparisons", [["within_a", "Second factor within each level of the first (Šidák)"], ["within_b", "First factor within each level of the second (Šidák)"], ["all", "Every combination (Tukey)"], ["none", "None"]]),
-      note("Type III sums of squares, so unequal group sizes are handled."),
+      s.subject_col && s.subject_col !== "__none__" && sel("sphericity", "Sphericity", [["gg", "Greenhouse-Geisser correction (recommended)"], ["none", "Assume sphericity"]]),
+      note(s.subject_col && s.subject_col !== "__none__" ? "Paired tests are used for comparisons within the same subjects." : "Type III sums of squares, so unequal group sizes are handled."),
+    ];
+  },
+  repeated: (s) => {
+    const c = columnsFor(s.dataset);
+    return [
+      sec("Data"),
+      datasetField(),
+      note("One row per measurement: the subject ID, its group, the time point (or condition) and the value. Subjects can be in different groups (mixed design) or measured under every combination."),
+      row(col("subject_col", "Subject ID column", c.all), col("value_col", "Measurement", c.numeric)),
+      row(col("a_col", "Group column", c.all), col("b_col", "Time point / condition", c.all)),
+      row(txt("a_order", "Group order", { placeholder: "e.g. Chow, High-fat" }), txt("b_order", "Time order", { placeholder: "e.g. Day 0, Day 7, Day 14" })),
+      row(txt("a_name", "Group name", { placeholder: "automatic" }), txt("b_name", "Time name", { placeholder: "automatic" })),
+      txt("y_name", "Measurement name", { placeholder: "e.g. Body weight (g)" }),
+      sec("Statistics"),
+      sel("sphericity", "Sphericity", [["gg", "Greenhouse-Geisser correction (recommended)"], ["none", "Assume sphericity"]]),
+      sel("transform", "Transform values first", [["none", "No transform"], ["log10", "log10"], ["log2", "log2"], ["sqrt", "Square root"]]),
+      sel("posthoc", "Multiple comparisons", [["at_x", "Groups at each time point (Šidák)"], ["along_x", "Time points within each group (Šidák)"], ["all", "Every combination (Holm)"], ["none", "None"]]),
+      note("Subjects missing a time point are left out and listed. Replicates of the same subject at the same time are averaged."),
+      sec("Display"),
+      seg("plot", "Plot", [["lines", "Lines over time"], ["bars", "Grouped bars"]]),
+      s.plot === "lines" && tog("show_subjects", "Show each subject as a thin line"),
+    ];
+  },
+  roc: (s) => {
+    const c = columnsFor(s.dataset);
+    const levels = lastResult?.meta?.roc?.levels || [];
+    return [
+      sec("Data"),
+      datasetField(),
+      note("One row per subject: the true outcome (e.g. Disease / Healthy, 1 / 0) and one or more marker columns."),
+      col("outcome_col", "Outcome column", c.all),
+      levels.length ? sel("positive", "Positive outcome", [["", "Automatic"]].concat(levels.map((l) => [l, l]))) : null,
+      cols("marker_cols", "Markers", c.numeric, "Leave all unchecked to use every numeric column. Markers measured in the same subjects are compared with DeLong's test."),
+      sel("direction", "Higher values mean", [["auto", "Automatic"], ["higher", "More likely positive"], ["lower", "Less likely positive"]]),
+      sec("Display"),
+      tog("show_cutoff", "Mark the best cut-off (Youden)"),
+      tog("show_dist", "Also plot the first marker by outcome"),
+      tog("steps", "Draw as steps"),
+    ];
+  },
+  agreement: (s) => {
+    const c = columnsFor(s.dataset);
+    return [
+      sec("Data"),
+      datasetField(),
+      note("One row per sample, measured by both methods."),
+      row(col("a_col", "Reference method", c.numeric), col("b_col", "New method", c.numeric)),
+      sec("Analysis"),
+      seg("mode", "Differences as", [["diff", "Absolute"], ["pct", "% of the mean"], ["ratio", "Ratio"]]),
+      note("Use % or ratio when the disagreement grows with the size of the measurement."),
+      tog("show_ci", "Shade confidence intervals of bias and limits"),
+      tog("show_trend", "Show the trend of the differences"),
+      tog("show_scatter", "Also draw the agreement scatter plot"),
+      sec("Labels"),
+      row(txt("x_name", "X-axis label", { placeholder: "automatic" }), txt("y_name", "Y-axis label", { placeholder: "automatic" })),
     ];
   },
   qpcr: (s) => {
@@ -1492,7 +1570,7 @@ function renderAnalysis() {
       <div class="choice-text"><h3>${esc(a.title)}</h3><p>${esc(a.desc)}</p></div>
       <button type="button" class="btn btn-small choice-try" data-example="${a.id}" title="Open example data for ${esc(a.title.toLowerCase())}">Example</button>
     </div>`;
-  const match = (a) => !q || (a.title + " " + a.desc + " " + a.id).toLowerCase().includes(q);
+  const match = (a) => !q || (a.title + " " + a.desc + " " + a.id + " " + (a.tags || "")).toLowerCase().includes(q);
   const groups = ANALYSIS_GROUPS.map(([name, ids]) => [name, ids.map((id) => ANALYSES.find((a) => a.id === id)).filter((a) => a && match(a))]).filter(([, list]) => list.length);
   const p = $("#panel-analysis");
   const focused = document.activeElement && document.activeElement.id === "analysis-search";
@@ -1531,6 +1609,7 @@ function renderData() {
       <span class="btn-row" style="justify-content:center">
         <button type="button" class="btn btn-primary" id="btn-add">Paste a new table</button>
         <button type="button" class="btn" id="btn-upload">Upload files</button>
+        ${tc ? "" : '<button type="button" class="btn" id="btn-plate" title="Paste 96- or 384-well plate readings and a plate map">Import a plate</button>'}
       </span>
       <input type="file" id="upload-file" multiple accept=".csv,.tsv,.txt,.xlsx,.xls" hidden>
     </div>`;
@@ -1804,6 +1883,59 @@ function saveProject() {
   if (typeof Cloud !== "undefined" && Cloud.ready()) return Cloud.saveCurrent();
   downloadProject();
 }
+// One-click report: everything about the current analysis on one printable page.
+function reportHTML() {
+  const r = lastResult;
+  const a = ANALYSES.find((x) => x.id === state.analysis);
+  const when = new Date();
+  const tables = r.tables.map((tb) => `<section class="tbl"><h3>${esc(tb.title)}</h3><table><thead><tr>${tb.columns.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead>
+    <tbody>${tb.rows.slice(0, 300).map((row) => `<tr>${row.map((v) => `<td>${esc(fmtNum(v))}</td>`).join("")}</tr>`).join("")}</tbody></table>
+    ${tb.rows.length > 300 ? `<p class="fine">First 300 of ${tb.rows.length} rows.</p>` : ""}</section>`).join("");
+  const data = NO_DATA.has(state.analysis) ? "" : `<p class="fine">Data: ${state.datasets.map((d) => esc(d.name)).join(", ") || "none"}.</p>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(state.name)} · Serpentine report</title>
+<style>
+  :root { --ink:#10201B; --muted:#536660; --line:#D5DED9; --accent:#127055; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.55 -apple-system, "Helvetica Neue", Arial, sans-serif; color: var(--ink); background: #fff; margin: 0; }
+  main { max-width: 900px; margin: 0 auto; padding: 32px 24px 64px; }
+  header { border-bottom: 2px solid var(--accent); padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; gap: 16px; align-items: end; flex-wrap: wrap; }
+  h1 { font-size: 24px; margin: 0 0 4px; } h2 { font-size: 17px; margin: 28px 0 10px; color: var(--accent); } h3 { font-size: 14px; margin: 18px 0 6px; }
+  .fine { color: var(--muted); font-size: 12px; margin: 2px 0; }
+  .res { border-left: 3px solid var(--accent); padding: 6px 12px; margin: 6px 0; background: #F3F7F5; }
+  .res b { display: block; font-size: 12.5px; } .res span { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+  .warn { background: #FFF6E5; border: 1px solid #F0D9A8; border-radius: 6px; padding: 8px 14px; margin: 10px 0; }
+  .warn ul { margin: 4px 0 0; padding-left: 18px; }
+  figure { margin: 14px 0; page-break-inside: avoid; break-inside: avoid; text-align: center; }
+  figure svg { max-width: 100%; height: auto; } figcaption { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  table { border-collapse: collapse; width: 100%; font-size: 11.5px; } th, td { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: left; vertical-align: top; }
+  th { background: #F3F7F5; } .tbl { overflow-x: auto; break-inside: avoid-page; }
+  .methods { white-space: pre-wrap; }
+  .bar { position: sticky; top: 0; background: #fff; border-bottom: 1px solid var(--line); padding: 8px 24px; display: flex; gap: 8px; justify-content: flex-end; }
+  .bar button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+  @media print { .bar { display: none; } main { padding: 0; } h2 { break-after: avoid; } }
+</style></head><body>
+<div class="bar"><button onclick="window.print()">Print or save as PDF</button></div>
+<main>
+<header><div><h1>${esc(state.name)}</h1><p class="fine">${esc(a ? a.title : state.analysis)} · ${when.toLocaleString()}</p>${data}</div><p class="fine">Made with Serpentine</p></header>
+<h2>Results</h2>
+${r.summary.map((s) => `<div class="res"><b>${esc(s.label)}</b><span>${esc(s.value)}</span></div>`).join("") || '<p class="fine">No test results for this analysis.</p>'}
+${r.notes.length ? `<div class="warn"><b>Notes</b><ul>${r.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul></div>` : ""}
+<h2>Figures</h2>
+${r.figures.map((f, i) => `<figure>${f.svg.replace(/id="([^"]+)"/g, `id="f${i}_$1"`).replace(/url\(#([^)]+)\)/g, `url(#f${i}_$1)`).replace(/xlink:href="#([^"]+)"/g, `xlink:href="#f${i}_$1"`).replace(/ href="#([^"]+)"/g, ` href="#f${i}_$1"`)}<figcaption>Figure ${i + 1}. ${esc(f.title)}</figcaption></figure>`).join("")}
+<h2>Methods</h2><p class="methods">${esc(r.methods)}</p>
+<h2>Tables</h2>${tables}
+</main></body></html>`;
+}
+function openReport() {
+  if (!lastResult) return toast("Run an analysis first.");
+  const html = reportHTML();
+  const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+  const w = window.open(url, "_blank");
+  if (!w) download(`${(state.name || "serpentine").replace(/[^\w\- ]+/g, "").trim() || "serpentine"} report.html`, html, "text/html");
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
 function downloadProject() {
   const { cloudId, cloudUpdated, ...rest } = state;
   download(slug(state.name) + ".serpentine.json", JSON.stringify(rest, null, 1), "application/json");
@@ -1905,6 +2037,9 @@ const ANALYSIS_HELP = {
   stdcurve: ["Standard curve", ["use 5PL", "straight line", "subtract the blank", "weight 1/y2", "dilution factor 10", "hide the guide lines"]],
   curvefit: ["Curve fit", ["fit one-phase decay", "Michaelis-Menten", "logistic growth", "show residuals", "show the confidence band", "compare Km"]],
   contingency: ["Counts", ["use Fisher's exact test", "chi-square", "grouped bars", "stacked counts", "hide the numbers in the bars"]],
+  repeated: ["Repeated measures", ["show each subject", "grouped bars", "compare time points within each group", "no sphericity correction"]],
+  roc: ["ROC", ["lower values are positive", "hide the cut-off", "draw as steps"]],
+  agreement: ["Agreement", ["percent differences", "use ratios", "show the trend line", "hide the scatter plot"]],
   power: ["Sample size", ["90% power", "alpha 0.01", "one-sided", "15% dropout", "paired design", "compare proportions"]],
 };
 
@@ -2296,6 +2431,8 @@ function bindEvents() {
       return download(`${slug(state.name)}_${slug(t.title)}.csv`, tableCSV(t), "text/csv");
     }
     if (e.target.closest("#btn-copy-methods") && lastResult) return copyText(lastResult.methods, "Methods text copied");
+    if (e.target.closest("#btn-report")) return openReport();
+    if (e.target.closest("#btn-share")) return typeof Cloud !== "undefined" ? Cloud.share() : toast("Share links need Serpentine's main site.");
     if (e.target.closest("#btn-script")) return downloadScript();
     const rt = e.target.closest(".rtab");
     if (rt) {

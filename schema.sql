@@ -39,3 +39,19 @@ CREATE TABLE IF NOT EXISTS attempts (
   at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS attempts_key ON attempts(key, at);
+CREATE TABLE IF NOT EXISTS shares (
+  id TEXT PRIMARY KEY,            -- 128-bit random; the decryption key is only in the link's #fragment
+  user_id TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  chunks INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  views INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS shares_user ON shares(user_id);
+CREATE TABLE IF NOT EXISTS share_chunks (
+  share_id TEXT NOT NULL,
+  idx INTEGER NOT NULL,
+  data BLOB NOT NULL,             -- encrypted bytes
+  PRIMARY KEY (share_id, idx)
+);

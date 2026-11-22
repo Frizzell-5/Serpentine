@@ -351,5 +351,21 @@ run("show as proportion", (s,x)=>x.settings.y_scale==="prop", {analysis:"surviva
 run("time in weeks", (s,x)=>x.settings.time_unit==="weeks", {analysis:"survival"});
 run("violin plot", (s,x)=>x.res.unknown.length===1, {analysis:"survival"});
 run("dark background", s=>s.theme==="dark", {analysis:"survival"});
+// v1.0: repeated measures, ROC, method comparison
+run("show each subject", (s,x)=>x.settings.show_subjects===true, {analysis:"repeated"});
+run("hide individual animals", (s,x)=>x.settings.show_subjects===false, {analysis:"repeated", settings:{show_subjects:true}});
+run("grouped bars", (s,x)=>x.settings.plot==="bars", {analysis:"repeated"});
+run("compare time points within each group", (s,x)=>x.settings.posthoc==="along_x", {analysis:"repeated"});
+run("compare groups at each time point", (s,x)=>x.settings.posthoc==="at_x", {analysis:"repeated", settings:{posthoc:"along_x"}});
+run("no sphericity correction", (s,x)=>x.settings.sphericity==="none", {analysis:"repeated"});
+run("use greenhouse-geisser", (s,x)=>x.settings.sphericity==="gg", {analysis:"repeated", settings:{sphericity:"none"}});
+run("lower values are positive", (s,x)=>x.settings.direction==="lower", {analysis:"roc"});
+run("hide the cut-off", (s,x)=>x.settings.show_cutoff===false, {analysis:"roc"});
+run("draw as steps", (s,x)=>x.settings.steps===true, {analysis:"roc"});
+run("percent differences", (s,x)=>x.settings.mode==="pct", {analysis:"agreement"});
+run("use ratios", (s,x)=>x.settings.mode==="ratio", {analysis:"agreement"});
+run("show the trend line", (s,x)=>x.settings.show_trend===true, {analysis:"agreement"});
+run("hide the scatter plot", (s,x)=>x.settings.show_scatter===false, {analysis:"agreement"});
+run("dark background", s=>s.theme==="dark", {analysis:"roc"});
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

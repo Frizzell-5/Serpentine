@@ -32,7 +32,7 @@ from scipy.optimize import curve_fit  # noqa: E402
 
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
-ENGINE_VERSION = "0.9.0"
+ENGINE_VERSION = "1.0.0"
 
 
 class UserError(Exception):
@@ -1533,6 +1533,7 @@ def analysis_compare(datasets, S, s):
     d = _pick_dataset(datasets, S.get("dataset"))
     df, info = read_table(d["text"])
     col_notes = []
+    nested_info = None
     layout = S.get("layout", "wide")
     paired = bool(S.get("paired")) and layout == "wide"
     if layout == "long":
@@ -1551,6 +1552,28 @@ def analysis_compare(datasets, S, s):
         names = _order(found, S.get("group_order"))
         values = [pd.to_numeric(df.loc[labels == g, vcol], errors="coerce").to_numpy(float) for g in names]
         ylabel = S.get("y_name") or vcol
+        scol = S.get("subject_col")
+        if scol and scol in df.columns and scol not in (vcol, gcol):
+            # Nested design: technical replicates within each animal/culture/well are averaged first, so the
+            # test counts biological replicates (avoids pseudoreplication)
+            subj = _labels(df, scol, info).astype(str)
+            v_all = pd.to_numeric(df[vcol], errors="coerce")
+            nested_rows, values = [], []
+            for g in names:
+                sel = (labels == g) & v_all.notna() & (subj.str.lower() != "nan")
+                grp = v_all[sel].groupby(subj[sel], sort=False)
+                means, counts, sds = grp.mean(), grp.size(), grp.std()
+                values.append(means.to_numpy(float))
+                for sid in means.index:
+                    nested_rows.append([g, sid, int(counts[sid]), _r(means[sid]), _r(sds[sid]) if counts[sid] > 1 else None])
+                shared = set(means.index) & set(x for h in names if h != g for x in subj[(labels == h)])
+                if shared:
+                    col_notes.append('Subject ID(s) %s appear in more than one group. IDs should be unique per subject.' % ", ".join(sorted(shared)[:5]))
+            n_tech = len(df[v_all.notna()])
+            n_bio = sum(len(v) for v in values)
+            col_notes.append("Nested design: %d measurements from %d subjects (%s). Each subject's replicates were averaged, "
+                             "so the statistics use n = %d biological replicates." % (n_tech, n_bio, scol, n_bio))
+            nested_info = {"rows": nested_rows, "col": scol, "n_tech": n_tech, "n_bio": n_bio}
     else:
         cols = [c for c in (S.get("columns") or []) if c in df.columns and info["kinds"][c] != "text"] \
             or _numeric_cols(df, info)
@@ -1625,10 +1648,16 @@ def analysis_compare(datasets, S, s):
     tables = [describe(names, values, shown)] + stats_tables(shown, res)
     if out_rows:
         tables.append({"title": "Possible outliers", "columns": ["Group", "Value", "Action"], "rows": out_rows})
+    meth = _methods(s, res, norm_note)
+    if nested_info:
+        tables.append({"title": "Subject means (nested replicates)", "columns": ["Group", "Subject", "Replicates", "Mean", "SD"],
+                       "rows": nested_info["rows"]})
+        meth = ("Technical replicates (%d measurements) were averaged within each subject, and the %d subject means were "
+                "analyzed. " % (nested_info["n_tech"], nested_info["n_bio"])) + meth
     return {
         "figures": [{"id": "groups", "title": "Group comparison", "fig": fig, "style": s}],
         "tables": tables, "summary": summary, "notes": col_notes + notes + res["notes"],
-        "methods": _methods(s, res, norm_note), "groups": names,
+        "methods": meth, "groups": names,
     }
 
 
@@ -2579,6 +2608,17 @@ def analysis_twoway(datasets, S, s):
         b_name = S.get("b_name") or ""
         ylabel = S.get("y_name") or ""
     else:
+        if S.get("_need_subject") and not (S.get("subject_col") in df.columns):
+            # Subject IDs: a column named like one, otherwise the text column with the most distinct values
+            guess = _guess_col(list(df.columns), r"^(subject|mouse|mice|animal|rat|patient|participant|donor|id|sample|culture|plant|fish)\b|\bid$")
+            if not guess and len(text) >= 3:
+                guess = max(text, key=lambda c: df[c].nunique())
+            if guess:
+                S = dict(S, subject_col=guess)
+                notes.append('Subjects were identified by "%s".' % guess)
+        scol0 = S.get("subject_col") if S.get("subject_col") in df.columns else None
+        text = [c for c in text if c != scol0]
+        num = [c for c in num if c != scol0]
         acol = _choose(S, "a_col", df, text[0] if text else None, notes, "first factor")
         bcol = _choose(S, "b_col", df, next((c for c in text if c != acol), None), notes, "second factor")
         vcol = _choose(S, "value_col", df, num[0] if num else None, notes, "value")
@@ -2595,6 +2635,12 @@ def analysis_twoway(datasets, S, s):
                  for i, a in enumerate(a_levels) for j, b in enumerate(b_levels)}
         a_name, b_name = S.get("a_name") or acol, S.get("b_name") or bcol
         ylabel = S.get("y_name") or vcol
+        scol = S.get("subject_col")
+        if S.get("_need_subject") and not (scol and scol in df.columns):
+            raise UserError("Choose the subject column: the animal, patient or culture ID that links repeated measurements.")
+        if scol and scol in df.columns and scol not in (acol, bcol, vcol):
+            return _twoway_repeated(a_lab, b_lab, v_all, _labels(df, scol, info), a_levels, b_levels, S, s, notes,
+                                    a_name, b_name, ylabel, S.get("transform", "none"))
     if len(a_levels) < 2 or len(b_levels) < 2:
         raise UserError("Each factor needs at least 2 levels (found %d and %d). With one factor, use Compare groups."
                         % (len(a_levels), len(b_levels)))
@@ -3175,8 +3221,13 @@ def analysis_stdcurve(datasets, S, s):
     summary = [{"label": "Standard curve", "value": "%s, R² = %.4f, %d standards" % (STD_MODELS[model], r2, len(np.unique(sx))), "p": None}]
     if lod_txt:
         u = " " + unit if unit else ""
-        summary.append({"label": "Limits from blanks", "value": "LOD %s%s, LOQ %s%s (blank + 3 SD / 10 SD)" % (
-            _fmt(lod_txt[0]), u, _fmt(lod_txt[1]), u), "p": None})
+        fl = lambda v: ("%s%s" % (_fmt(v), u)) if np.isfinite(v) else "below the curve's range"
+        summary.append({"label": "Limits from blanks", "value": "LOD %s, LOQ %s (blank + 3 SD / 10 SD)" % (
+            fl(lod_txt[0]), fl(lod_txt[1])), "p": None})
+        if not (np.isfinite(lod_txt[0]) and np.isfinite(lod_txt[1])):
+            notes.append("The blanks are so consistent that blank + 3 SD (or 10 SD) falls below the bottom of the fitted curve, "
+                         "so the limit can't be read off it. Report the lowest standard (%s%s) as the lower limit of the range."
+                         % (_fmt(float(np.min(sx[sx > 0])) if (sx > 0).any() else lo_std), u))
     if unk_table:
         ok_unk = [r for r in unk_table if r[5] is not None]
         summary.append({"label": "Unknowns", "value": "%d interpolated%s" % (len(ok_unk), ", %d flagged" % flags if flags else ""), "p": None})
@@ -4086,6 +4137,647 @@ def board(panels, cols=2, width=7.0, fmt="png", dpi=300, letters="A", letter_siz
             plt.close(f["fig"])
 
 
+# ----------------------------------------------------------------------------
+# Repeated-measures and mixed two-way ANOVA
+# ----------------------------------------------------------------------------
+
+def _helmert(k):
+    """Orthonormal contrasts, k x (k - 1)."""
+    H = np.zeros((k, max(k - 1, 0)))
+    for j in range(1, k):
+        H[:j, j - 1] = 1.0
+        H[j, j - 1] = -float(j)
+        H[:, j - 1] /= np.linalg.norm(H[:, j - 1])
+    return H
+
+
+def _gg_epsilon(M, C, groups=None):
+    """Greenhouse-Geisser epsilon for data M (subjects x k) under contrasts C (k x p).
+    With groups (mixed designs) the pooled within-group covariance is used."""
+    if C.shape[1] <= 1:
+        return 1.0
+    T = M @ C
+    if groups is None:
+        Sm = np.cov(T, rowvar=False, ddof=1)
+    else:
+        acc, dfp = 0.0, 0
+        for g in np.unique(groups):
+            Tg = T[groups == g]
+            if len(Tg) > 1:
+                acc = acc + (len(Tg) - 1) * np.cov(Tg, rowvar=False, ddof=1)
+                dfp += len(Tg) - 1
+        if not dfp:
+            return 1.0
+        Sm = acc / dfp
+    Sm = np.atleast_2d(Sm)
+    p = Sm.shape[0]
+    tr, tr2 = np.trace(Sm), np.trace(Sm @ Sm)
+    if tr2 <= 0:
+        return 1.0
+    return float(min(1.0, max(1.0 / p, tr ** 2 / (p * tr2))))
+
+
+def _term(ss, df, ss_err, df_err, eps=1.0):
+    ms_e = ss_err / df_err if df_err > 0 else np.nan
+    F = (ss / df) / ms_e if df > 0 and ms_e and ms_e > 0 else np.nan
+    p = float(stats.f.sf(F, df, df_err)) if np.isfinite(F) else np.nan
+    p_gg = float(stats.f.sf(F, df * eps, df_err * eps)) if np.isfinite(F) else np.nan
+    return {"ss": ss, "df": df, "ms": ss / df if df else np.nan, "F": F, "p": p, "eps": eps, "p_gg": p_gg,
+            "ss_err": ss_err, "df_err": df_err, "eta": ss / (ss + ss_err) if ss + ss_err > 0 else np.nan}
+
+
+def mixed_anova(Y, g):
+    """A between subjects (g: group index per subject), B within. Y: subjects x b."""
+    n_s, b = Y.shape
+    a = int(g.max()) + 1
+    m = Y.mean()
+    ms = Y.mean(axis=1)
+    ss_tot = float(((Y - m) ** 2).sum())
+    ss_subj = float(b * ((ms - m) ** 2).sum())
+    na = np.array([(g == i).sum() for i in range(a)], float)
+    ma = np.array([Y[g == i].mean() for i in range(a)])
+    ss_a = float(b * (na * (ma - m) ** 2).sum())
+    mj = Y.mean(axis=0)
+    ss_b = float(n_s * ((mj - m) ** 2).sum())
+    mij = np.array([Y[g == i].mean(axis=0) for i in range(a)])
+    ss_cells = float((na[:, None] * (mij - m) ** 2).sum())
+    ss_ab = ss_cells - ss_a - ss_b
+    ss_sa = ss_subj - ss_a
+    ss_err = ss_tot - ss_subj - ss_b - ss_ab
+    eps = _gg_epsilon(Y, _helmert(b), g)
+    return {"A": _term(ss_a, a - 1, ss_sa, n_s - a), "B": _term(ss_b, b - 1, ss_err, (b - 1) * (n_s - a), eps),
+            "AB": _term(ss_ab, (a - 1) * (b - 1), ss_err, (b - 1) * (n_s - a), eps)}
+
+
+def rm2_anova(Y):
+    """Both factors within subjects. Y: subjects x a x b."""
+    n, a, b = Y.shape
+    m = Y.mean()
+    ms = Y.mean(axis=(1, 2))
+    mi = Y.mean(axis=(0, 2))
+    mj = Y.mean(axis=(0, 1))
+    msi = Y.mean(axis=2)
+    msj = Y.mean(axis=1)
+    mij = Y.mean(axis=0)
+    ss_a = n * b * ((mi - m) ** 2).sum()
+    ss_as = b * ((msi - ms[:, None] - mi[None, :] + m) ** 2).sum()
+    ss_b = n * a * ((mj - m) ** 2).sum()
+    ss_bs = a * ((msj - ms[:, None] - mj[None, :] + m) ** 2).sum()
+    ss_ab = n * ((mij - mi[:, None] - mj[None, :] + m) ** 2).sum()
+    resid = Y - msi[:, :, None] - msj[:, None, :] - mij[None] + ms[:, None, None] + mi[None, :, None] + mj[None, None, :] - m
+    ss_abs = (resid ** 2).sum()
+    Ca, Cb = _helmert(a), _helmert(b)
+    e_a = _gg_epsilon(msi, Ca)
+    e_b = _gg_epsilon(msj, Cb)
+    e_ab = _gg_epsilon(Y.reshape(n, a * b), np.kron(Ca, Cb))
+    return {"A": _term(float(ss_a), a - 1, float(ss_as), (a - 1) * (n - 1), e_a),
+            "B": _term(float(ss_b), b - 1, float(ss_bs), (b - 1) * (n - 1), e_b),
+            "AB": _term(float(ss_ab), (a - 1) * (b - 1), float(ss_abs), (a - 1) * (b - 1) * (n - 1), e_ab)}
+
+
+def _x_positions(labels):
+    """Use real spacing when every level carries a number (0h, 2h, 8h / Day 1, Day 7), otherwise even spacing."""
+    nums = [re.search(r"-?\d+(?:\.\d+)?", str(x)) for x in labels]
+    rest = {re.sub(r"-?\d+(?:\.\d+)?", "#", str(x)).strip() for x in labels}
+    if all(nums) and len(rest) == 1:
+        v = [float(m.group()) for m in nums]
+        if len(set(v)) == len(v) and v == sorted(v):
+            return np.array(v), True
+    return np.arange(len(labels), dtype=float), False
+
+
+def _rm_line_figure(line_lv, x_lv, get, s, star_p, ylabel, xlabel, legend_title, show_subjects):
+    """Repeated measures: mean +/- error over the repeated factor, one line per group, stars where groups differ."""
+    xs, numeric = _x_positions(x_lv)
+    step = (np.ptp(xs) / max(1, len(xs) - 1)) if len(xs) > 1 else 1.0
+    G = _gstyles(s, line_lv)
+    fig, ax = _new_fig(s)
+    lw, ms = s["line_width"], s["marker_size"]
+    nl = len(line_lv)
+    dodge = (np.arange(nl) - (nl - 1) / 2) * step * 0.05 if s["error"] != "none" else np.zeros(nl)
+    tops = np.full(len(xs), -np.inf)
+    with plt.rc_context(_rc(s)):
+        for li, g in enumerate(G):
+            arrs = [np.asarray(get(li, xi), float) for xi in range(len(xs))]
+            if show_subjects and arrs and len({len(a) for a in arrs}) == 1:
+                M = np.vstack(arrs)
+                for k in range(M.shape[1]):
+                    ax.plot(xs + dodge[li], M[:, k], color=to_rgba(g["color"], 0.28), lw=max(0.5, lw * 0.5), zorder=2)
+            means = np.array([np.nanmean(a) if np.isfinite(a).any() else np.nan for a in arrs])
+            errs = np.array([_err(a, s["error"]) for a in arrs])
+            ax.errorbar(xs + dodge[li], means, yerr=errs if s["error"] != "none" else None, color=g["color"], lw=lw * 1.3,
+                        ls=g["ls"], marker=g["marker"], ms=ms * 1.1, mec=s["bg"], mew=0.8, ecolor=g["color"],
+                        elinewidth=s["error_width"], capsize=s["cap_size"] * 0.7, zorder=4, label=g["label"])
+            hi = means + errs
+            if show_subjects:
+                hi = np.maximum(hi, [np.nanmax(a) if np.isfinite(a).any() else -np.inf for a in arrs])
+            tops = np.maximum(tops, hi)
+        if star_p:
+            lo_, hi_ = ax.get_ylim()
+            pad = (hi_ - lo_) * 0.04
+            for xi, p in star_p.items():
+                st = stars(p)
+                if st != "ns" and np.isfinite(tops[xi]):
+                    ax.text(xs[xi], tops[xi] + pad, st, ha="center", va="bottom", fontsize=s["sig_size"], color=s["fg"], zorder=6)
+            ax.set_ylim(lo_, max(hi_, np.nanmax(tops[np.isfinite(tops)]) + pad * 3.5) if np.isfinite(tops).any() else hi_)
+        ax.set_xticks(xs)
+        ax.set_xticklabels([str(x) for x in x_lv])
+        ax.set_xlim(xs.min() - step * 0.35, xs.max() + step * 0.35)
+        _finish(ax, s, xlabel=xlabel, ylabel=ylabel, legend=nl > 1)
+        if nl > 1 and ax.get_legend() is not None and legend_title:
+            ax.get_legend().set_title(legend_title)
+    return fig
+
+
+def _twoway_repeated(a_lab, b_lab, v_all, subj, a_levels, b_levels, S, s, notes, a_name, b_name, ylabel, transform):
+    if transform in ("log10", "log2", "sqrt"):
+        v_all = np.array(v_all, float)
+        v_all[(v_all < 0) if transform == "sqrt" else (v_all <= 0)] = np.nan
+        v_all = {"log10": np.log10, "log2": np.log2, "sqrt": np.sqrt}[transform](v_all)
+        ylabel = "%s(%s)" % (transform, ylabel)
+    d = pd.DataFrame({"a": a_lab.astype(str).to_numpy(), "b": b_lab.astype(str).to_numpy(),
+                      "s": subj.astype(str).to_numpy(), "v": v_all})
+    d = d[np.isfinite(d["v"]) & d["a"].isin(a_levels) & d["b"].isin(b_levels) & (d["s"].str.lower() != "nan")]
+    if d.empty:
+        raise UserError("No values found with a subject, both factors and a number.")
+    reps = d.groupby(["s", "a", "b"]).size()
+    if (reps > 1).any():
+        notes.append("Some subjects have several values in the same combination; they were averaged first "
+                     "(technical replicates).")
+    cell = d.groupby(["s", "a", "b"])["v"].mean()
+    a_per_s = d.groupby("s")["a"].nunique()
+    b_per_s = d.groupby("s")["b"].nunique()
+    nA, nB = len(a_levels), len(b_levels)
+    swapped = False
+    if (a_per_s == 1).all() and (b_per_s > 1).any():
+        design = "mixed"
+    elif (b_per_s == 1).all() and (a_per_s > 1).any():
+        design, swapped = "mixed", True  # second factor is between subjects: analyze with roles swapped
+    elif (a_per_s > 1).all() and (b_per_s > 1).all():
+        design = "within"
+    else:
+        raise UserError("With a subject column, each subject must either stay in one group of a factor and be measured "
+                        "at every level of the other (a mixed design), or be measured in every combination of both "
+                        "factors (both repeated). Check the subject IDs.")
+    keep_levels = (a_levels, b_levels) if not swapped else (b_levels, a_levels)
+    between_lv, within_lv = keep_levels
+    ckey = (lambda s_, i, j: (s_, a_levels[i], b_levels[j]))
+    subjects = list(dict.fromkeys(d["s"]))
+    dropped = []
+    if design == "mixed":
+        rows, groups = [], []
+        for s_ in subjects:
+            grp = d.loc[d["s"] == s_, "b" if swapped else "a"].iloc[0]
+            gi = between_lv.index(grp)
+            vals = []
+            for w in within_lv:
+                key = (s_, grp, w) if not swapped else (s_, w, grp)
+                vals.append(cell.get(key, np.nan))
+            if np.all(np.isfinite(vals)):
+                rows.append(vals)
+                groups.append(gi)
+            else:
+                dropped.append(s_)
+        Y, g = np.array(rows, float), np.array(groups)
+        counts = [int((g == i).sum()) for i in range(len(between_lv))]
+        if min(counts) < 2:
+            raise UserError("Each group needs at least 2 complete subjects (found %s)." % ", ".join(
+                "%s: %d" % (lv, c) for lv, c in zip(between_lv, counts)))
+        res = mixed_anova(Y, g)
+        cells = {}
+        for i, bl in enumerate(between_lv):
+            for j, wl in enumerate(within_lv):
+                key = (i, j) if not swapped else (j, i)
+                cells[key] = Y[g == i, j]
+    else:
+        Y = []
+        for s_ in subjects:
+            m_ = np.array([[cell.get(ckey(s_, i, j), np.nan) for j in range(nB)] for i in range(nA)])
+            if np.all(np.isfinite(m_)):
+                Y.append(m_)
+            else:
+                dropped.append(s_)
+        Y = np.array(Y, float)
+        if len(Y) < 3:
+            raise UserError("Need at least 3 subjects measured in every combination.")
+        res = rm2_anova(Y)
+        cells = {(i, j): Y[:, i, j] for i in range(nA) for j in range(nB)}
+    if dropped:
+        notes.append("%d subject(s) with a missing combination were left out: %s." % (
+            len(dropped), ", ".join(dropped[:8]) + (" …" if len(dropped) > 8 else "")))
+    if swapped:
+        res = {"A": res["B"], "B": res["A"], "AB": res["AB"]}
+    within = {"A": design == "within" or swapped, "B": design == "within" or not swapped}
+    names = {"A": a_name, "B": b_name or "Second factor", "AB": "Interaction"}
+    use_gg = S.get("sphericity", "gg") == "gg"
+    summary, rows_t = [], []
+    for key in ("AB", "A", "B"):
+        t = res[key]
+        is_w = key == "AB" and design != "mixed" or (key == "AB" and design == "mixed") or within.get(key, False)
+        gg_applies = is_w and t["eps"] < 0.9999 and use_gg
+        p_show = t["p_gg"] if gg_applies else t["p"]
+        df1 = t["df"] * (t["eps"] if gg_applies else 1)
+        df2 = t["df_err"] * (t["eps"] if gg_applies else 1)
+        summary.append({"label": "%s%s%s" % (names[key], "" if key == "AB" else " (main effect)",
+                                             ", within subjects" if is_w and key != "AB" else ""),
+                        "value": "F(%s, %s) = %.3f, %s, partial η² = %.2f%s" % (
+                            ("%.2f" % df1) if gg_applies else "%d" % df1, ("%.1f" % df2) if gg_applies else "%d" % df2,
+                            t["F"], fmt_p(p_show), t["eta"], ", Greenhouse-Geisser ε = %.2f" % t["eps"] if gg_applies else ""),
+                        "p": _r(p_show)})
+        rows_t.append([names[key], "within" if is_w else "between", _r(t["ss"]), t["df"], _r(t["ms"]), _r(t["F"]), _r(t["p"]),
+                       _r(t["eps"]) if is_w else None, _r(t["p_gg"]) if is_w else None, _r(t["eta"]), stars(p_show),
+                       _r(t["ss_err"]), t["df_err"]])
+    if res["AB"]["p"] < 0.05:
+        notes.append("The interaction is significant: the effect of one factor depends on the other, so look at the "
+                     "comparisons within each level.")
+    # Post-hoc: paired tests where the same subjects are compared, Welch tests otherwise
+    mode = S.get("posthoc", "at_x")
+    x_is_b = not swapped  # the repeated factor goes on the x axis; groups become lines
+    if mode == "at_x":
+        mode = "within_b" if x_is_b else "within_a"
+    elif mode == "along_x":
+        mode = "within_a" if x_is_b else "within_b"
+    comps = []
+    if mode == "within_a":
+        comps = [((i, j), (i, j2)) for i in range(nA) for j in range(nB) for j2 in range(j + 1, nB)]
+    elif mode == "within_b":
+        comps = [((i, j), (i2, j)) for j in range(nB) for i in range(nA) for i2 in range(i + 1, nA)]
+    elif mode == "all":
+        ks = [(i, j) for i in range(nA) for j in range(nB)]
+        comps = [(ks[x], ks[y]) for x in range(len(ks)) for y in range(x + 1, len(ks))]
+    raw, kinds = [], []
+    for k1, k2 in comps:
+        x1, x2 = cells[k1], cells[k2]
+        same_subjects = design == "within" or (k1[0] == k2[0] if not swapped else k1[1] == k2[1])
+        if same_subjects and len(x1) == len(x2) and len(x1) > 1:
+            dd = x2 - x1
+            p = float(stats.ttest_rel(x2, x1).pvalue) if np.std(dd) > 0 else (1.0 if np.all(dd == 0) else 0.0)
+            kinds.append("paired t")
+        else:
+            p = float(stats.ttest_ind(x2, x1, equal_var=False).pvalue) if len(x1) > 1 and len(x2) > 1 else np.nan
+            kinds.append("Welch t")
+        raw.append(p if np.isfinite(p) else 1.0)
+    adj = [_sidak(p, len(comps)) for p in raw] if mode != "all" else list(_holm(raw)) if raw else []
+    lab = lambda k: "%s · %s" % (a_levels[k[0]], b_levels[k[1]])
+    rows_pc = [[lab(k2) + " vs " + lab(k1), _r(float(np.mean(cells[k2]) - np.mean(cells[k1]))), kd, _r(p), stars(p)]
+               for (k1, k2), kd, p in zip(comps, kinds, adj)]
+    pairs = [(k1, k2, p) for (k1, k2), p in zip(comps, adj)]
+    if S.get("plot", "lines") == "lines":
+        x_lv, line_lv = (b_levels, a_levels) if x_is_b else (a_levels, b_levels)
+        get = (lambda li, xi: cells[(li, xi)]) if x_is_b else (lambda li, xi: cells[(xi, li)])
+        star_p = {}
+        for k1, k2, p in pairs:
+            xa, xb = (k1[1], k2[1]) if x_is_b else (k1[0], k2[0])
+            if xa == xb:
+                star_p[xa] = min(star_p.get(xa, 1.0), p)
+        fig = _rm_line_figure(line_lv, x_lv, get, s, star_p, ylabel, names["B"] if x_is_b else a_name,
+                              a_name if x_is_b else names["B"], bool(S.get("show_subjects", False)))
+        if pairs and not star_p:
+            notes.append("Comparisons along the repeated factor are listed in the table; stars on the plot mark "
+                         "differences between groups at the same level.")
+    else:
+        fig, drawn = _grouped_figure(a_levels, b_levels, cells, s, pairs, ylabel, xlabel=a_name, legend_title=b_name)
+        if drawn < 0:
+            notes.append("%d comparisons are significant, too many to draw as brackets; see the table." % -drawn)
+    n_subj = len(Y)
+    design_txt = ("a mixed-design two-way ANOVA with %s as the between-subjects factor and %s as the within-subjects "
+                  "(repeated) factor" % ((a_name, names["B"]) if not swapped else (names["B"], a_name))) if design == "mixed" \
+        else "a two-way repeated-measures ANOVA with %s and %s both measured within subjects" % (a_name, names["B"])
+    tables = [describe(["%s · %s" % (a_levels[i], b_levels[j]) for i in range(nA) for j in range(nB)],
+                       [cells[(i, j)] for i in range(nA) for j in range(nB)]),
+              {"title": "Two-way ANOVA (%s)" % ("mixed design" if design == "mixed" else "repeated measures"),
+               "columns": ["Source", "Factor type", "SS", "df", "MS", "F", "p", "GG epsilon", "p (Greenhouse-Geisser)",
+                           "Partial eta squared", "Summary", "Error SS", "Error df"], "rows": rows_t}]
+    if rows_pc:
+        tables.append({"title": "Multiple comparisons (%s)" % ("Holm" if mode == "all" else "Šidák"),
+                       "columns": ["Comparison", "Mean difference", "Test", "Adjusted p", "Summary"], "rows": rows_pc})
+    meth = ("Data from %d subjects were analyzed by %s%s. %s Post-hoc comparisons used paired t-tests for levels measured "
+            "in the same subjects and Welch t-tests otherwise, with %s correction. %s P < 0.05 was considered statistically "
+            "significant. %s" % (
+                n_subj, design_txt, "; values were %s-transformed first" % transform if transform in ("log10", "log2", "sqrt") else "",
+                "Sphericity was handled with the Greenhouse-Geisser correction." if use_gg else "No sphericity correction was applied.",
+                "Holm" if mode == "all" else "Šidák", _methods_shown(s), _software_line()))
+    lines_plot = S.get("plot", "lines") == "lines"
+    return {"figures": [{"id": "repeated", "title": "Repeated measures", "fig": fig, "style": s}],
+            "tables": tables, "summary": summary, "notes": notes, "methods": meth,
+            "groups": (a_levels if x_is_b else b_levels) if lines_plot else b_levels}
+
+
+# ----------------------------------------------------------------------------
+# ROC curves
+# ----------------------------------------------------------------------------
+
+_POSITIVE = re.compile(r"^(1|yes|y|true|pos|positive|case|cases|disease|diseased|sick|patient|patients|tumou?r|cancer|"
+                       r"dead|died|event|abnormal|malignant|infected|responder|affected)$", re.I)
+
+
+def _delong(pos, neg):
+    """AUC with DeLong placements. Returns auc, variance, V10 (per positive), V01 (per negative)."""
+    m, n = len(pos), len(neg)
+    r = stats.rankdata(np.concatenate([pos, neg]))
+    V10 = (r[:m] - stats.rankdata(pos)) / n
+    V01 = 1.0 - (r[m:] - stats.rankdata(neg)) / m
+    auc = float(V10.mean())
+    var = float(np.var(V10, ddof=1) / m + np.var(V01, ddof=1) / n) if m > 1 and n > 1 else np.nan
+    return auc, var, V10, V01
+
+
+def _roc_points(pos, neg):
+    th = np.unique(np.concatenate([pos, neg]))[::-1]
+    sens = np.array([0.0] + [(pos >= t).mean() for t in th])
+    fpr = np.array([0.0] + [(neg >= t).mean() for t in th])
+    return np.concatenate([[np.inf], th]), sens, fpr
+
+
+def analysis_roc(datasets, S, s):
+    d = _pick_dataset(datasets, S.get("dataset"))
+    df, info = read_table(d["text"])
+    notes = []
+    num = _numeric_cols(df, info)
+    cols_all = list(df.columns)
+    two_level = [c for c in cols_all if df[c].dropna().astype(str).str.strip().replace("", np.nan).dropna().nunique() == 2]
+    ocol = _choose(S, "outcome_col", df, _guess_col(two_level, r"outcome|status|disease|group|diagnos|class|label|case|event")
+                   or (two_level[0] if two_level else None), notes, "outcome")
+    if not ocol:
+        raise UserError("Choose the outcome column: two values such as disease/healthy, 1/0 or case/control.")
+    _need_col(df, ocol, "outcome")
+    lab = _labels(df, ocol, info).astype(str).str.strip()
+    levels = [x for x in dict.fromkeys(lab) if x and x.lower() != "nan"]
+    if len(levels) != 2:
+        raise UserError('The outcome column "%s" should have exactly two values (found %d: %s).' % (
+            ocol, len(levels), ", ".join(levels[:6])))
+    pos_lv = S.get("positive") if S.get("positive") in levels else next((x for x in levels if _POSITIVE.match(x)), None)
+    if pos_lv is None:
+        counts = lab.value_counts()
+        pos_lv = min(levels, key=lambda x: (counts.get(x, 0), x))
+        notes.append('The positive outcome was taken to be "%s". Change it in Settings if needed.' % pos_lv)
+    neg_lv = [x for x in levels if x != pos_lv][0]
+    mcols = [c for c in (S.get("marker_cols") or []) if c in df.columns and c != ocol] or [c for c in num if c != ocol]
+    if not mcols:
+        raise UserError("Choose at least one numeric marker column.")
+    is_pos = (lab == pos_lv).to_numpy()
+    is_neg = (lab == neg_lv).to_numpy()
+    G = _gstyles(s, mcols)
+    direction = S.get("direction", "auto")
+    fig, ax = _new_fig(s)
+    lw, ms = s["line_width"], s["marker_size"]
+    rows, cut_rows, summary, placements = [], [], [], {}
+    first = None
+    with plt.rc_context(_rc(s)):
+        ax.plot([0, 100], [0, 100], color=to_rgba(s["fg"], 0.35), lw=max(0.6, lw * 0.6), ls=(0, (3, 3)), zorder=1)
+        for g, c in zip(G, mcols):
+            x = pd.to_numeric(df[c], errors="coerce").to_numpy(float)
+            ok = np.isfinite(x)
+            pos, neg = x[ok & is_pos], x[ok & is_neg]
+            if len(pos) < 2 or len(neg) < 2:
+                notes.append("%s: need at least 2 subjects in each outcome group." % g["label"])
+                continue
+            auc0 = _delong(pos, neg)[0]
+            flip = direction == "lower" or (direction == "auto" and auc0 < 0.5)
+            if flip:
+                pos, neg = -pos, -neg
+                if direction == "auto":
+                    notes.append("%s: lower values indicate %s, so the direction was reversed." % (g["label"], pos_lv))
+            auc, var, V10, V01 = _delong(pos, neg)
+            placements[c] = (V10, V01, ok, flip)
+            se = math.sqrt(var) if np.isfinite(var) and var > 0 else np.nan
+            lo, hi = max(0.0, auc - 1.959964 * se), min(1.0, auc + 1.959964 * se)
+            p = float(2 * stats.norm.sf(abs(auc - 0.5) / se)) if se and np.isfinite(se) else np.nan
+            th, sens, fpr = _roc_points(pos, neg)
+            j = sens - fpr
+            k = int(np.argmax(j))
+            cut = th[k]
+            sens_k, spec_k = sens[k], 1 - fpr[k]
+            tp, fn = int(round(sens_k * len(pos))), len(pos) - int(round(sens_k * len(pos)))
+            tn, fp = int(round(spec_k * len(neg))), len(neg) - int(round(spec_k * len(neg)))
+            ppv = tp / (tp + fp) if tp + fp else np.nan
+            npv = tn / (tn + fn) if tn + fn else np.nan
+            real_cut = -cut if flip else cut
+            rule = "%s %s %s" % (c, "≤" if flip else "≥", _fmt(real_cut))
+            ax.plot(fpr * 100, sens * 100, color=g["color"], lw=lw * 1.3, ls=g["ls"], zorder=3,
+                    label="%s (AUC %.2f)" % (g["label"], auc), drawstyle="steps-post" if S.get("steps", False) else "default")
+            if S.get("show_cutoff", True):
+                ax.scatter([fpr[k] * 100], [sens[k] * 100], s=(ms * 1.5) ** 2, marker=g["marker"], color=g["color"],
+                           edgecolor=s["bg"], linewidth=1, zorder=5)
+            rows.append([g["label"], _r(auc, 4), _r(lo, 4), _r(hi, 4), _r(se, 4), _r(p), len(pos), len(neg),
+                         rule, _r(sens_k * 100, 4), _r(spec_k * 100, 4), _r(ppv * 100, 4), _r(npv * 100, 4), _r(j[k], 4)])
+            summary.append({"label": "%s AUC" % g["label"], "value": "%.3f (95%% CI %.3f to %.3f), %s; best cut-off %s: sensitivity %.0f%%, specificity %.0f%%"
+                            % (auc, lo, hi, fmt_p(p), rule, sens_k * 100, spec_k * 100), "p": _r(p)})
+            for t_, se_, fp_ in list(zip(th, sens, fpr))[1:]:
+                cut_rows.append([g["label"], _r(-t_ if flip else t_), _r(se_ * 100, 4), _r((1 - fp_) * 100, 4), _r(se_ + (1 - fp_) - 1, 4)])
+            if first is None:
+                first = (c, g, x[ok & is_pos], x[ok & is_neg], real_cut)
+        ax.set_xlim(-1, 101)
+        ax.set_ylim(-1, 101)
+        _finish(ax, s, xlabel="100 − Specificity (%)", ylabel="Sensitivity (%)", legend=True)
+    # Paired comparison of AUCs (DeLong) when markers were measured in the same subjects
+    comp_rows = []
+    keys = list(placements)
+    for i in range(len(keys)):
+        for j2 in range(i + 1, len(keys)):
+            c1, c2 = keys[i], keys[j2]
+            ok_both = placements[c1][2] & placements[c2][2]
+            x1 = pd.to_numeric(df[c1], errors="coerce").to_numpy(float) * (-1 if placements[c1][3] else 1)
+            x2 = pd.to_numeric(df[c2], errors="coerce").to_numpy(float) * (-1 if placements[c2][3] else 1)
+            P1, N1 = x1[ok_both & is_pos], x1[ok_both & is_neg]
+            P2, N2 = x2[ok_both & is_pos], x2[ok_both & is_neg]
+            if len(P1) < 2 or len(N1) < 2:
+                continue
+            a1, _, v10a, v01a = _delong(P1, N1)
+            a2, _, v10b, v01b = _delong(P2, N2)
+            S10 = np.cov(np.vstack([v10a, v10b]))
+            S01 = np.cov(np.vstack([v01a, v01b]))
+            var = (S10[0, 0] + S10[1, 1] - 2 * S10[0, 1]) / len(P1) + (S01[0, 0] + S01[1, 1] - 2 * S01[0, 1]) / len(N1)
+            z = (a1 - a2) / math.sqrt(var) if var > 0 else np.nan
+            p = float(2 * stats.norm.sf(abs(z))) if np.isfinite(z) else np.nan
+            comp_rows.append(["%s vs %s" % (c1, c2), _r(a1, 4), _r(a2, 4), _r(a1 - a2, 4), _r(z, 4), _r(p), stars(p)])
+            summary.append({"label": "%s vs %s (DeLong)" % (c1, c2), "value": "ΔAUC = %.3f, z = %.2f, %s" % (a1 - a2, z, fmt_p(p)),
+                            "p": _r(p)})
+    figures = [{"id": "roc", "title": "ROC curve", "fig": fig, "style": s}]
+    if first and S.get("show_dist", True):
+        c, g, pv, nv, cut = first
+        s2 = dict(s, ref_lines="", panel_label="", title="", ylabel="", xlabel="", ymin="", ymax="", xmin="", xmax="",
+                  logx=False, groups={}, width=max(2.2, s["width"] * 0.62))
+        res = {"pairs": [], "notes": []}
+        fig2 = _group_figure([neg_lv, pos_lv], [nv, pv], s2, res, False, c, width=s2["width"])
+        ax2 = fig2.axes[0]
+        with plt.rc_context(_rc(s2)):
+            (ax2.axvline if s2["orientation"] == "horizontal" else ax2.axhline)(
+                cut, color=s["fg"], lw=max(0.7, lw * 0.7), ls=(0, (4, 2)), zorder=6)
+        figures.append({"id": "roc_dist", "title": "Marker by outcome", "fig": fig2, "style": s2})
+    tables = [{"title": "ROC analysis (positive = %s)" % pos_lv,
+               "columns": ["Marker", "AUC", "95% CI low", "95% CI high", "SE", "p (AUC = 0.5)", "Positives", "Negatives",
+                           "Best cut-off (Youden)", "Sensitivity (%)", "Specificity (%)", "PPV (%)", "NPV (%)", "Youden J"],
+               "rows": rows}]
+    if comp_rows:
+        tables.append({"title": "Comparison of AUCs (DeLong, paired)", "columns": ["Markers", "AUC 1", "AUC 2", "Difference", "z", "p", "Summary"],
+                       "rows": comp_rows})
+    tables.append({"title": "Sensitivity and specificity at every cut-off", "columns": ["Marker", "Cut-off", "Sensitivity (%)",
+                                                                                         "Specificity (%)", "Youden J"], "rows": cut_rows})
+    notes.append("PPV and NPV use the proportion of %s in this sample (%.0f%%); they change with prevalence." % (
+        pos_lv, is_pos.sum() / max(1, (is_pos | is_neg).sum()) * 100))
+    meth = ("Diagnostic performance was assessed with receiver operating characteristic (ROC) curves, with %s as the positive "
+            "outcome. The area under the curve (AUC) and its 95%% confidence interval were estimated with DeLong's method, "
+            "the optimal cut-off was chosen by the Youden index%s. %s" % (
+                pos_lv, ", and AUCs of markers measured in the same subjects were compared with DeLong's test" if comp_rows else "",
+                _software_line()))
+    return {"figures": figures, "tables": tables, "summary": summary, "notes": notes, "methods": meth, "groups": mcols,
+            "meta": {"roc": {"levels": levels, "positive": pos_lv}}}
+
+
+# ----------------------------------------------------------------------------
+# Method comparison: Bland-Altman and concordance
+# ----------------------------------------------------------------------------
+
+def _lin_ccc(x, y):
+    n = len(x)
+    mx, my = x.mean(), y.mean()
+    sx2, sy2 = x.var(), y.var()
+    sxy = ((x - mx) * (y - my)).mean()
+    ccc = 2 * sxy / (sx2 + sy2 + (mx - my) ** 2)
+    r = np.corrcoef(x, y)[0, 1]
+    u = (mx - my) / math.sqrt(math.sqrt(sx2 * sy2)) if sx2 > 0 and sy2 > 0 else 0.0
+    try:
+        se_z = math.sqrt(((1 - r ** 2) * ccc ** 2 / ((1 - ccc ** 2) * r ** 2)
+                          + 2 * ccc ** 3 * (1 - ccc) * u ** 2 / (r * (1 - ccc ** 2) ** 2)
+                          - ccc ** 4 * u ** 4 / (2 * r ** 2 * (1 - ccc ** 2) ** 2)) / (n - 2))
+        z = math.atanh(ccc)
+        lo, hi = math.tanh(z - 1.959964 * se_z), math.tanh(z + 1.959964 * se_z)
+    except (ValueError, ZeroDivisionError):
+        lo = hi = np.nan
+    return float(ccc), lo, hi, float(r)
+
+
+def analysis_agreement(datasets, S, s):
+    d = _pick_dataset(datasets, S.get("dataset"))
+    df, info = read_table(d["text"])
+    notes = []
+    num = _numeric_cols(df, info)
+    acol = _choose(S, "a_col", df, num[0] if num else None, notes, "first method")
+    bcol = _choose(S, "b_col", df, next((c for c in num if c != acol), None), notes, "second method")
+    if not acol or not bcol or acol == bcol:
+        raise UserError("Choose two different numeric columns: the same samples measured by two methods.")
+    _need_col(df, acol, "first method")
+    _need_col(df, bcol, "second method")
+    x = pd.to_numeric(df[acol], errors="coerce").to_numpy(float)
+    y = pd.to_numeric(df[bcol], errors="coerce").to_numpy(float)
+    ok = np.isfinite(x) & np.isfinite(y)
+    if (~ok).sum():
+        notes.append("%d row(s) without both measurements were left out." % int((~ok).sum()))
+    x, y = x[ok], y[ok]
+    n = len(x)
+    if n < 3:
+        raise UserError("Need at least 3 samples measured by both methods.")
+    if np.ptp(x) == 0 or np.ptp(y) == 0:
+        raise UserError("One method gave the same value for every sample, so agreement can't be assessed. "
+                        "Check that the right columns are selected.")
+    mode = S.get("mode", "diff")
+    mean = (x + y) / 2
+    unit_re = re.compile(r"\s*\(([^()]*)\)\s*$")
+    ua, ub = unit_re.search(acol), unit_re.search(bcol)
+    short_a, short_b = unit_re.sub("", acol) or acol, unit_re.sub("", bcol) or bcol
+    unit_txt = " (%s)" % ua.group(1) if ua and ub and ua.group(1) == ub.group(1) else ""
+    if mode == "pct":
+        if (mean == 0).any():
+            raise UserError("Percent differences need non-zero means.")
+        diff = (y - x) / mean * 100
+        dlabel = "%s − %s (%% of mean)" % (short_b, short_a)
+    elif mode == "ratio":
+        if (x <= 0).any() or (y <= 0).any():
+            raise UserError("Ratios need values above 0.")
+        diff = np.log(y / x)
+        dlabel = "%s / %s" % (short_b, short_a)
+    else:
+        diff = y - x
+        dlabel = "%s − %s%s" % (short_b, short_a, unit_txt)
+    bias = float(diff.mean())
+    sd = float(diff.std(ddof=1))
+    t = stats.t.ppf(0.975, n - 1)
+    se_b = sd / math.sqrt(n)
+    se_l = sd * math.sqrt(3.0 / n)
+    lo_l, hi_l = bias - 1.96 * sd, bias + 1.96 * sd
+    back = (lambda v: math.exp(v)) if mode == "ratio" else (lambda v: v)
+    p_bias = float(stats.ttest_1samp(diff, 0).pvalue) if sd > 0 else np.nan
+    lr = stats.linregress(mean, diff) if np.ptp(mean) > 0 else None
+    G = _gstyles(s, ["Samples"])
+    c = G[0]["color"]
+    lw, ms = s["line_width"], s["marker_size"]
+    fig, ax = _new_fig(s)
+    with plt.rc_context(_rc(s)):
+        yplot = np.exp(diff) if mode == "ratio" else diff
+        ax.scatter(mean, yplot, s=ms ** 2 * 1.2, marker=G[0]["marker"], color=to_rgba(c, s["point_alpha"]),
+                   edgecolor=_point_edge(s, c), linewidth=s["point_edge_width"], zorder=4)
+        xl = (mean.min() - 0.04 * np.ptp(mean), mean.max() + 0.04 * np.ptp(mean) + 1e-12)
+        lines = [(bias, "Mean %s" % _fmt(back(bias)), 1.4, "-"), (lo_l, "−1.96 SD %s" % _fmt(back(lo_l)), 1.0, (0, (4, 2))),
+                 (hi_l, "+1.96 SD %s" % _fmt(back(hi_l)), 1.0, (0, (4, 2)))]
+        for v, label, wmul, ls in lines:
+            yv = back(v)
+            ax.axhline(yv, color=s["fg"], lw=max(0.6, lw * 0.7 * wmul), ls=ls, zorder=2)
+            ax.annotate(label, xy=(1.0, yv), xycoords=("axes fraction", "data"), xytext=(4, 0), textcoords="offset points",
+                        va="center", ha="left", fontsize=s["tick_size"] * 0.9, color=s["fg"], annotation_clip=False)
+            if S.get("show_ci", True) and np.isfinite(se_l):
+                se_ = se_b if v == bias else se_l
+                ax.axhspan(back(v - t * se_), back(v + t * se_), color=to_rgba(c if v == bias else s["fg"], 0.08), lw=0, zorder=1)
+        ax.axhline(back(0), color=to_rgba(s["fg"], 0.35), lw=max(0.5, lw * 0.5), zorder=1)
+        if S.get("show_trend", False) and lr is not None:
+            xx = np.linspace(*xl, 50)
+            ax.plot(xx, [back(v) for v in lr.intercept + lr.slope * xx], color=c, lw=lw, ls=(0, (1, 1.5)), zorder=3)
+        ax.set_xlim(*xl)
+        if mode == "ratio":
+            ax.set_yscale("log")
+        _finish(ax, s, xlabel=S.get("x_name") or "Mean of both methods%s" % unit_txt, ylabel=S.get("y_name") or dlabel)
+    figures = [{"id": "blandaltman", "title": "Bland-Altman", "fig": fig, "style": s}]
+    ccc, c_lo, c_hi, r = _lin_ccc(x, y)
+    if S.get("show_scatter", True):
+        s2 = dict(s, ref_lines="", panel_label="", title="", xlabel="", ylabel="", ymin="", ymax="", xmin="", xmax="", logy=False)
+        fig2, ax2 = _new_fig(s2, max(2.4, s["height"]))
+        with plt.rc_context(_rc(s2)):
+            ax2.scatter(x, y, s=ms ** 2 * 1.2, marker=G[0]["marker"], color=to_rgba(c, s["point_alpha"]),
+                        edgecolor=_point_edge(s, c), linewidth=s["point_edge_width"], zorder=4)
+            lo_ = min(x.min(), y.min())
+            hi_ = max(x.max(), y.max())
+            pad = (hi_ - lo_) * 0.05 + 1e-12
+            ax2.plot([lo_ - pad, hi_ + pad], [lo_ - pad, hi_ + pad], color=to_rgba(s["fg"], 0.45), lw=max(0.6, lw * 0.6), ls=(0, (3, 3)), zorder=2)
+            if np.ptp(x) > 0:
+                fit = stats.linregress(x, y)
+                xx = np.array([lo_ - pad, hi_ + pad])
+                ax2.plot(xx, fit.intercept + fit.slope * xx, color=c, lw=lw * 1.2, zorder=3)
+            ax2.set_xlim(lo_ - pad, hi_ + pad)
+            ax2.set_ylim(lo_ - pad, hi_ + pad)
+            ax2.set_aspect("equal", adjustable="box")
+            ax2.text(0.04, 0.96, "CCC = %.3f\nr = %.3f" % (ccc, r), transform=ax2.transAxes, va="top", ha="left",
+                     fontsize=s["font_size"] * 0.85)
+            _finish(ax2, s2, xlabel=acol, ylabel=bcol)
+        figures.append({"id": "agreement_scatter", "title": "Agreement", "fig": fig2, "style": s2})
+    unit = "%" if mode == "pct" else ""
+    summary = [{"label": "Bias (mean %s)" % ("ratio" if mode == "ratio" else "difference"),
+                "value": "%s%s (95%% CI %s to %s), %s" % (_fmt(back(bias)), unit, _fmt(back(bias - t * se_b)), _fmt(back(bias + t * se_b)),
+                                                      fmt_p(p_bias)), "p": _r(p_bias)},
+               {"label": "95% limits of agreement", "value": "%s to %s%s" % (_fmt(back(lo_l)), _fmt(back(hi_l)), unit), "p": None},
+               {"label": "Lin's concordance", "value": "CCC = %.3f (95%% CI %.3f to %.3f), Pearson r = %.3f, n = %d" % (ccc, c_lo, c_hi, r, n), "p": None}]
+    if lr is not None:
+        summary.append({"label": "Proportional bias", "value": "slope %s, %s" % (_fmt(lr.slope), fmt_p(lr.pvalue)), "p": _r(lr.pvalue)})
+        if lr.pvalue < 0.05:
+            notes.append("The difference changes with the size of the measurement (proportional bias). Consider percent "
+                         "differences or ratios in Settings, or show the trend line.")
+    if n >= 3 and np.ptp(diff) > 0 and stats.shapiro(diff).pvalue < 0.05:
+        notes.append("The differences don't look normally distributed, so the limits of agreement may be inaccurate. "
+                     "A ratio or percent scale often helps.")
+    tables = [{"title": "Bland-Altman analysis", "columns": ["Statistic", "Value", "95% CI low", "95% CI high"],
+               "rows": [["n", n, None, None],
+                        ["Bias", _r(back(bias)), _r(back(bias - t * se_b)), _r(back(bias + t * se_b))],
+                        ["SD of differences", _r(sd), None, None],
+                        ["Lower limit of agreement", _r(back(lo_l)), _r(back(lo_l - t * se_l)), _r(back(lo_l + t * se_l))],
+                        ["Upper limit of agreement", _r(back(hi_l)), _r(back(hi_l - t * se_l)), _r(back(hi_l + t * se_l))],
+                        ["Lin's CCC", _r(ccc), _r(c_lo), _r(c_hi)], ["Pearson r", _r(r), None, None]]},
+              {"title": "Per sample", "columns": ["Row", acol, bcol, "Mean", "Difference" if mode != "ratio" else "Ratio"],
+               "rows": [[k + 1, _r(a), _r(b), _r(m_), _r(back(dv))] for k, (a, b, m_, dv) in enumerate(zip(x, y, mean, diff))]}]
+    meth = ("Agreement between %s and %s was assessed with a Bland-Altman analysis of %s (bias and 95%% limits of agreement, "
+            "with confidence intervals after Bland and Altman) and Lin's concordance correlation coefficient. %s"
+            % (acol, bcol, {"pct": "percent differences", "ratio": "ratios (log scale)"}.get(mode, "differences"), _software_line()))
+    return {"figures": figures, "tables": tables, "summary": summary, "notes": notes, "methods": meth, "groups": ["Samples"]}
+
+
 ANALYSES = {
     "compare": analysis_compare,
     "timecourse": analysis_timecourse,
@@ -4098,6 +4790,9 @@ ANALYSES = {
     "curvefit": analysis_curvefit,
     "contingency": analysis_contingency,
     "power": analysis_power,
+    "repeated": lambda datasets, S, s: analysis_twoway(datasets, dict(S, layout="long", _need_subject=True), s),
+    "roc": analysis_roc,
+    "agreement": analysis_agreement,
 }
 NO_DATA = {"power"}
 
@@ -4344,6 +5039,39 @@ def example(kind):
     if kind == "power":
         return {"datasets": [], "settings": {"design": "two", "entry": "raw", "mean1": 100, "mean2": 80, "sd": 15,
                                              "unit": "mg/dL", "alpha": 0.05, "power": 0.8, "dropout": 10, "solve": "n"}}
+    if kind == "repeated":
+        # Body weight of the same mice weighed weekly on chow or a high-fat diet (mixed design)
+        rows = []
+        for diet, gain in (("Chow", 0.45), ("High-fat diet", 1.35)):
+            for m in range(7):
+                start = rng.normal(22, 1.3)
+                slope = gain * (1 + rng.normal(0, 0.18))
+                mouse = "%s-%d" % ("C" if diet == "Chow" else "H", m + 1)
+                for wk in range(0, 6):
+                    rows.append([mouse, diet, "Week %d" % wk, "%.1f" % (start + slope * wk + rng.normal(0, 0.45))])
+        return {"datasets": [{"name": "Weekly body weight", "meta": {}, "text": _tsv(["Mouse", "Diet", "Week", "Body weight (g)"], rows)}],
+                "settings": {"a_col": "Diet", "b_col": "Week", "value_col": "Body weight (g)", "subject_col": "Mouse",
+                             "posthoc": "within_b", "sphericity": "gg"}}
+    if kind == "roc":
+        # Serum marker levels in patients with and without disease
+        rows = []
+        for status, n, mu in (("Disease", 34, 1.0), ("Healthy", 46, 0.0)):
+            for i in range(n):
+                a = math.exp(rng.normal(3.0 + 0.85 * mu, 0.45))
+                b = math.exp(rng.normal(2.2 + 0.35 * mu, 0.5))
+                rows.append([status, "%.1f" % a, "%.2f" % b])
+        order = rng.permutation(len(rows))
+        rows = [rows[i] for i in order]
+        return {"datasets": [{"name": "Biomarker panel", "meta": {}, "text": _tsv(["Diagnosis", "Marker A (ng/mL)", "Marker B (ng/mL)"], rows)}],
+                "settings": {"outcome_col": "Diagnosis", "positive": "Disease", "direction": "auto"}}
+    if kind == "agreement":
+        # The same blood samples measured on a lab analyzer and a handheld meter
+        rows = []
+        for i in range(40):
+            ref = rng.uniform(60, 260)
+            rows.append(["S%02d" % (i + 1), "%.0f" % ref, "%.0f" % (ref * 1.04 + 3 + rng.normal(0, 7))])
+        return {"datasets": [{"name": "Glucose method comparison", "meta": {}, "text": _tsv(["Sample", "Lab analyzer (mg/dL)", "Handheld meter (mg/dL)"], rows)}],
+                "settings": {"a_col": "Lab analyzer (mg/dL)", "b_col": "Handheld meter (mg/dL)", "mode": "diff"}}
     raise UserError("No example for %s" % kind)
 
 

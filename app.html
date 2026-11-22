@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Serpentine App</title>
-<meta name="description" content="Analyze lab data and make publication-quality figures without writing code. Python runs in your browser; your data never leaves your computer.">
+<meta name="description" content="Analyze lab data and make publication-quality figures without writing code. Python runs in your browser; projects saved online are end-to-end encrypted.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <!-- Figure fonts, so previews match PNG/PDF exports -->
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Fira+Sans:wght@400;700&family=Barlow:wght@400;700&family=Poppins:wght@400;700&family=PT+Serif:wght@400;700&family=Crimson+Text:wght@400;700&family=Courier+Prime:wght@400;700&family=Space+Mono:wght@400;700&family=Comic+Neue:wght@400;700&display=swap">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M21.5 6.5c-5.5 0-11 1.6-11 5.4s11 3.8 11 8.2-5.5 5.4-11 5.4' fill='none' stroke='%23127055' stroke-width='3.2' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='6.5' r='2.9' fill='%23127055'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="app.css?v=0.9.0">
+<link rel="stylesheet" href="app.css?v=1.0.0">
 </head>
 <body>
 <header class="topbar">
@@ -75,7 +75,8 @@
           <li><b>Settings:</b> choose the statistics, baseline and windows.</li>
           <li><b>Style:</b> make the figure your own. Or just type what you want in the box below, like “remove gridlines”.</li>
         </ol>
-        <p>Not sure which analysis? Press <b>Help me choose</b>. Press <b>+ Board</b> on figures to combine them into one multi-panel figure, and <b>Sign in</b> to save projects online and open them anywhere. <b>Undo</b> (⌘Z) covers everything, and <b>?</b> shows every keyboard shortcut.</p>
+        <p>Not sure which analysis? Press <b>Help me choose</b>. New in 1.0: <b>Repeated measures</b>, <b>ROC curves</b>, <b>Method comparison</b> and <b>Import a plate</b> for plate readers. Under every result, <b>Report</b> makes a printable summary and <b>Share link</b> sends a colleague the whole analysis.</p>
+        <p>Press <b>+ Board</b> on figures to combine them into one multi-panel figure, and <b>Sign in</b> to save projects online and open them anywhere. <b>Undo</b> (⌘Z) covers everything, and <b>?</b> shows every keyboard shortcut.</p>
         <p class="fine">Everything runs on your computer. Projects you save online are end-to-end encrypted, so only you can read them.</p>
       </div>
       <div class="btn-row welcome-actions">
@@ -96,6 +97,10 @@
     </form>
     <div id="figures" class="figures"></div>
     <div id="results" class="results" hidden>
+      <div class="result-actions">
+        <button type="button" class="btn btn-small" id="btn-report" title="Figures, results, tables and methods on one printable page"><svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M8 10h5M8 13h5"/></svg>Report</button>
+        <button type="button" class="btn btn-small" id="btn-share" title="Send a colleague an encrypted link to this analysis"><svg viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.5 11.5a3.5 3.5 0 005 0l2.5-2.5a3.5 3.5 0 00-5-5l-1 1"/><path d="M11.5 8.5a3.5 3.5 0 00-5 0L4 11a3.5 3.5 0 005 5l1-1"/></svg>Share link</button>
+      </div>
       <div id="summary" class="summary"></div>
       <div class="result-tabs" role="tablist">
         <button class="rtab" data-rtab="tables" type="button">Tables</button>
@@ -130,8 +135,9 @@
   </div>
 </div>
 <div id="toast" class="toast" role="status" hidden></div>
-<script src="commands.js?v=0.9.0"></script>
-<script src="app.js?v=0.9.0"></script>
-<script src="cloud.js?v=0.9.0"></script>
+<script src="commands.js?v=1.0.0"></script>
+<script src="app.js?v=1.0.0"></script>
+<script src="plate.js?v=1.0.0"></script>
+<script src="cloud.js?v=1.0.0"></script>
 </body>
 </html>

@@ -6,9 +6,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Serpentine</title>
 <meta name="claude:viewport-fit-sides" content="cover">
-<meta name="description" content="Serpentine turns raw lab data into statistics and publication-quality figures without code. Python runs in your browser, so your data never leaves your computer.">
+<meta name="description" content="Serpentine turns raw lab data into statistics and publication-quality figures without code: group comparisons, repeated measures, curve fits, standard curves, qPCR, ROC and more. Python runs in your browser; optional accounts are end-to-end encrypted.">
 <meta property="og:title" content="Serpentine">
-<meta property="og:description" content="Statistics and publication-quality figures from raw lab data. No code, nothing uploaded.">
+<meta property="og:description" content="Statistics and publication-quality figures from raw lab data. No code, runs in your browser, end-to-end encrypted accounts.">
 <meta property="og:image" content="https://serpentine-4qu.pages.dev/docs/screenshot.png">
 <meta property="og:type" content="website">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M21.5 6.5c-5.5 0-11 1.6-11 5.4s11 3.8 11 8.2-5.5 5.4-11 5.4' fill='none' stroke='%23127055' stroke-width='3.2' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='6.5' r='2.9' fill='%23127055'/%3E%3C/svg%3E">
@@ -248,7 +248,7 @@ footer .sp { margin-left: auto; }
   <!-- Hero -->
   <section class="hero">
     <div class="wrap">
-      <div class="eyebrow rise"><span>v0.9</span><i></i><span>Free</span><i></i><span>Runs in your browser</span><i></i><span>Encrypted accounts</span></div>
+      <div class="eyebrow rise"><span>v1.0</span><i></i><span>Free</span><i></i><span>Runs in your browser</span><i></i><span>Encrypted accounts</span></div>
       <h1 class="rise d1">Raw lab data in. <em>Publication figures</em> out.</h1>
       <p class="lede rise d2">Serpentine runs the statistics and draws the figures for you, using the same Python tools behind countless published studies. You choose everything from plain menus and never write a line of code. Your data stays on your computer, and if you want your projects everywhere, a free account keeps them online, end-to-end encrypted.</p>
       <div class="cta rise d3">
@@ -268,7 +268,7 @@ footer .sp { margin-left: auto; }
   <!-- Facts -->
   <div class="strip">
     <div class="wrap">
-      <div class="stat"><b>11</b><span>analyses, from t-tests to qPCR</span></div>
+      <div class="stat"><b>14</b><span>analyses, from t-tests to ROC curves</span></div>
       <div class="stat"><b>10</b><span>plot types, each fully adjustable</span></div>
       <div class="stat"><b>0</b><span>lines of code to write</span></div>
       <div class="stat"><b>0&nbsp;KB</b><span>of your data readable by anyone else</span></div>
@@ -284,8 +284,8 @@ footer .sp { margin-left: auto; }
         <p>The figure redraws every time you change a setting, so you can see what each choice does.</p>
       </div>
       <ol class="steps">
-        <li><span class="n">01</span><h3>Pick an analysis</h3><p>Compare groups or two factors at once, follow a recording over time, fit any curve, read an ELISA, quantify qPCR, analyze counts, draw survival curves or plan your sample size.</p></li>
-        <li><span class="n">02</span><h3>Add your data</h3><p>Paste straight from Excel, Prism or a LabChart Data Pad, or drop in CSV and Excel files.</p></li>
+        <li><span class="n">01</span><h3>Pick an analysis</h3><p>Compare groups or two factors at once, follow animals over weeks, fit any curve, read an ELISA, quantify qPCR, test a biomarker, compare two instruments, draw survival curves or plan your sample size.</p></li>
+        <li><span class="n">02</span><h3>Add your data</h3><p>Paste straight from Excel, Prism or a LabChart Data Pad, drop in CSV and Excel files, or paste a 96- or 384-well plate with its plate map.</p></li>
         <li><span class="n">03</span><h3>Set the analysis</h3><p>Baselines, exclusions, normalization, tests and comparisons, each one a plain setting.</p></li>
         <li><span class="n">04</span><h3>Style and export</h3><p>Choose a look, fine-tune colors and labels, combine figures into one lettered multi-panel figure, then export figures, tables and methods text.</p></li>
       </ol>
@@ -380,6 +380,27 @@ footer .sp { margin-left: auto; }
           <p>How many animals or patients you need, the power of a planned study, or the smallest effect it can detect. Two groups, paired, ANOVA, proportions or correlations, with dropout, and a justification paragraph ready for ethics protocols and grants.</p>
           <div class="tags"><span>a priori n</span><span>power curves</span><span>dropout</span><span>IACUC / ethics</span></div>
           <figcaption><span class="figlabel">Fig. 12 |</span> Ten per group detect a 20 mg/dL difference (SD 15) with 80% power.</figcaption>
+        </figure>
+        <figure class="card">
+          <div class="imgs"><img src="docs/img/g-repeated.png" alt="Mean body weight over six weeks for mice on chow or a high-fat diet, with error bars and stars from week 3 on." loading="lazy"></div>
+          <h3>Repeated measures</h3>
+          <p>The same animals or patients measured again and again, in one or more groups. Mixed-design or two-way repeated-measures ANOVA with the Greenhouse-Geisser correction, paired post-hoc tests, and lines over time with stars where groups differ. Subjects with a missing time point are listed, not silently dropped.</p>
+          <div class="tags"><span>mixed ANOVA</span><span>RM ANOVA</span><span>sphericity</span><span>growth curves</span><span>longitudinal</span></div>
+          <figcaption><span class="figlabel">Fig. 14 |</span> Weekly body weight of the same mice on chow or a high-fat diet; diet × week interaction.</figcaption>
+        </figure>
+        <figure class="card">
+          <div class="imgs"><img src="docs/img/g-roc.png" alt="ROC curves for two biomarkers with AUCs of 0.95 and 0.78 and the best cut-off marked on each." loading="lazy"></div>
+          <h3>ROC curve (diagnostic test)</h3>
+          <p>How well a marker tells patients from controls. AUC with a DeLong 95% confidence interval, the best cut-off by the Youden index with its sensitivity, specificity, PPV and NPV, and a test of whether one marker beats another in the same subjects.</p>
+          <div class="tags"><span>AUC</span><span>DeLong</span><span>cut-off</span><span>sensitivity</span><span>specificity</span></div>
+          <figcaption><span class="figlabel">Fig. 15 |</span> Two serum markers in 80 patients; Marker A separates disease from healthy better (p = 0.0005).</figcaption>
+        </figure>
+        <figure class="card">
+          <div class="imgs"><img src="docs/img/g-agreement.png" alt="Bland-Altman plot of handheld meter minus lab analyzer against their mean, with bias and limits of agreement." loading="lazy"></div>
+          <h3>Method comparison</h3>
+          <p>Do a new assay and a reference method give the same numbers? Bland-Altman bias and 95% limits of agreement with confidence intervals, absolute, percent or ratio differences, a check for proportional bias, and Lin's concordance coefficient.</p>
+          <div class="tags"><span>Bland-Altman</span><span>limits of agreement</span><span>Lin's CCC</span><span>assay validation</span></div>
+          <figcaption><span class="figlabel">Fig. 16 |</span> Glucose from a handheld meter against the lab analyzer in 40 samples.</figcaption>
         </figure>
       </div>
       <figure class="card board-card" style="margin-top:24px">
@@ -479,6 +500,21 @@ footer .sp { margin-left: auto; }
           <h3>Undo anything</h3>
           <p>Every change, including deleted tables and cleared boards, can be undone, with a history list and keyboard shortcuts for the things you do most.</p>
         </div>
+        <div class="feature">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="7.5" cy="9.5" r="1.2"/><circle cx="12" cy="9.5" r="1.2"/><circle cx="16.5" cy="9.5" r="1.2"/><circle cx="7.5" cy="14.5" r="1.2"/><circle cx="12" cy="14.5" r="1.2"/><circle cx="16.5" cy="14.5" r="1.2"/></svg>
+          <h3>Plate reader import</h3>
+          <p>Paste a 96- or 384-well plate and its plate map. Standards, blanks and replicates are recognized, shown on a live plate, and sent straight to a standard curve.</p>
+        </div>
+        <div class="feature">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a4 4 0 005.66 0l3-3a4 4 0 00-5.66-5.66l-1 1"/><path d="M14 10a4 4 0 00-5.66 0l-3 3a4 4 0 005.66 5.66l1-1"/></svg>
+          <h3>Encrypted share links</h3>
+          <p>Send a colleague a link that opens your whole analysis in their browser. The key is only in the link, so nobody else, the server included, can read it.</p>
+        </div>
+        <div class="feature">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 12h7M9 16h7"/></svg>
+          <h3>One-click reports</h3>
+          <p>Results, figures, methods and tables on one printable page for your lab notebook, a meeting or a supervisor.</p>
+        </div>
       </div>
     </div>
   </section>
@@ -555,6 +591,9 @@ footer .sp { margin-left: auto; }
                 <tr><td>How potent is this compound?</td><td>Dose-response curve.</td></tr>
                 <tr><td>How long until death, relapse or another event?</td><td>Survival curve. One row per subject with its time, whether the event happened (1) or it was censored (0), and its group.</td></tr>
                 <tr><td>Do two factors, like genotype and treatment, interact?</td><td>Two-way ANOVA. One row per value with both factors, or a Prism-style grouped table.</td></tr>
+                <tr><td>How did the same animals change over weeks, by group?</td><td>Repeated measures. One row per measurement with subject ID, group, time point and value.</td></tr>
+                <tr><td>How well does a marker detect disease?</td><td>ROC curve. One row per subject with the true outcome and the marker values.</td></tr>
+                <tr><td>Does a new method agree with the old one?</td><td>Method comparison. One row per sample measured by both methods.</td></tr>
                 <tr><td>Did more animals respond in one group?</td><td>Counts &amp; proportions. A table of counts, or one row per subject.</td></tr>
                 <tr><td>What is the Km, half-life or doubling time?</td><td>Curve fitting. Pick a model or type your own equation.</td></tr>
                 <tr><td>What concentration is in my samples?</td><td>Standard curve. Standards with known concentrations, unknowns with the concentration left empty.</td></tr>
@@ -584,6 +623,16 @@ M2      KO         29.4
             <p>In LabChart, select the rows of your Data Pad, copy them, and paste into Serpentine. Channel, measurement and unit rows become tidy names like <code>Cyclic Rate (BPM)</code>, and time columns written as <code>8:40</code> or <code>0:08:40</code> are read as clock times automatically. If you marked the injection with a LabChart comment, Serpentine uses that comment's time as the event, so you don't have to type it.</p>
             <h4>From Prism</h4>
             <p>Grouped tables with several replicate columns under one heading (Control: Rep 1, Rep 2, Rep 3) are combined into one group per heading. Turn this off in Settings if you want every column on its own.</p>
+            <h4>From a plate reader</h4>
+            <p>Press <strong>Import a plate</strong> in the Data step. Paste the block of readings from any plate reader's export (96 or 384 wells, with or without the A–H letters and 1–12 header), and optionally a plate map in the same layout saying what is in each well:</p>
+<pre class="sample">     1          2          3          4
+A    Std 1000   Std 1000   Control 1  Control 1
+B    Std 500    Std 500    Control 2  Control 2
+…
+H    Blank      Blank</pre>
+            <p>Standards are labelled <code>Std 250</code> or just the concentration, blanks <code>Blank</code> or <code>B</code>, and wells with the same label are replicates. Empty wells are skipped. A live plate preview shows how each well was read. With standards, the table goes straight into a <strong>Standard curve</strong> with the blank subtracted; without them, choose one row per well or one column per sample for Compare groups.</p>
+            <h4>Technical replicates</h4>
+            <p>If each animal, culture or well was measured several times, use the values + group layout with a column naming the subject, and set <strong>Replicates nested in</strong> to that column in Settings. Replicates are averaged per subject first, so the test counts biological replicates instead of inflating n (pseudoreplication).</p>
           </article>
 
           <article id="g-sessions">
@@ -622,6 +671,8 @@ M2      KO         29.4
               </tbody>
             </table></div>
             <p>Effect sizes (Hedges' g or Cohen's d<sub>z</sub>) are reported for two-group tests. Groups with fewer than five values trigger a reminder to show individual points and interpret p-values carefully.</p>
+            <h4>Repeated measures over time</h4>
+            <p>When the same subjects are measured at several time points, use <strong>Repeated measures</strong> (or add a subject column in Two-way ANOVA). Serpentine works out the design from the subject IDs: a <em>mixed design</em> when each subject stays in one group, or <em>repeated measures on both factors</em> when every subject gets every combination. Sphericity is corrected with Greenhouse-Geisser by default (ε is reported), comparisons within the same subjects use paired t-tests, and Šidák or Holm corrects for multiple comparisons. Results match pingouin and SPSS.</p>
           </article>
 
           <article id="g-style">
@@ -656,6 +707,8 @@ M2      KO         29.4
               <li><strong>Tables:</strong> <em>Copy for Excel</em> puts a table on your clipboard to paste into Excel or Prism; <em>CSV</em> downloads it.</li>
               <li><strong>Methods text:</strong> a paragraph describing what was done. Treat it as a draft and check it against your protocol.</li>
               <li><strong>Python script:</strong> a single file that reproduces the analysis. Run it with <code>pip install numpy scipy pandas matplotlib</code> then <code>python script.py</code>.</li>
+              <li><strong>Report:</strong> the <em>Report</em> button above the results opens one page with the results, notes, every figure, the methods and all tables, ready to print or save as a PDF for a lab notebook or meeting.</li>
+              <li><strong>Share link:</strong> <em>Share link</em> makes a link that opens a copy of the whole analysis (data, settings, style and board) in anyone's browser. It's encrypted with a key that exists only in the link, so the server can't read it. Choose how long it works (1 day to 1 year) and remove it any time. Making links needs a free account; opening them doesn't.</li>
             </ul>
           </article>
 
@@ -728,11 +781,12 @@ M2      KO         29.4
       </div>
       <div class="faq">
         <details><summary>Is my data uploaded anywhere?</summary><p>Not unless you choose to. All parsing, statistics and drawing happen on your computer, and your latest project is kept in your browser's local storage. If you create an account and save projects online, they are encrypted on your computer with your password first (end-to-end encryption), so the server stores only scrambled data that no one else can read, including whoever runs Serpentine.</p></details>
+        <details><summary>Can the person I send a share link to see my other projects?</summary><p>No. A share link opens a copy of one analysis as it was when you made the link. They can change their copy freely; your project and account are untouched. Remove the link in <em>Share link → Your links</em> to stop it working.</p></details>
         <details><summary>I forgot my password. Can you reset it?</summary><p>Because projects are end-to-end encrypted, nobody can reset it for you. Use <em>Forgot password?</em> with the recovery key you saved when you created the account. Without the recovery key and the password, online projects can't be opened; copies saved as files are unaffected.</p></details>
         <details><summary>Is it free?</summary><p>Yes. Serpentine is free to use, online or downloaded.</p></details>
         <details><summary>Can I trust the statistics?</summary><p>Serpentine uses SciPy, the standard open scientific library behind much of published research, for every test, and it reports exactly which test was used. You can also download the Python script and check every step. As with any software, choose an analysis that matches your experimental design.</p></details>
         <details><summary>Will my figures look like everyone else's?</summary><p>Only if you want them to. Every visual property is a setting, from fonts and axis lines to per-group markers and hatch patterns, and the optional Python box lets you do anything matplotlib can. Save your look as a style so your figures stay recognisably yours.</p></details>
-        <details><summary>Does it replace GraphPad Prism?</summary><p>For the analyses it covers, it can. Serpentine focuses on things Prism handles less well: event-aligned recordings, fully customizable modern plot types such as raincloud and beeswarm plots, reproducible scripts and keeping data local. With eleven analyses, including two-way ANOVA, nonlinear curve fitting, standard curves and qPCR, it now covers what most labs use day to day; Prism still has more specialized analyses.</p></details>
+        <details><summary>Does it replace GraphPad Prism?</summary><p>For the analyses it covers, it can. Serpentine focuses on things Prism handles less well: event-aligned recordings, fully customizable modern plot types such as raincloud and beeswarm plots, reproducible scripts and keeping data local. With fourteen analyses, including two-way and repeated-measures ANOVA, nonlinear curve fitting, standard curves, qPCR, ROC curves and Bland-Altman, it covers what most labs use day to day; Prism still has more specialized analyses.</p></details>
         <details><summary>How do I cite Serpentine?</summary><p>The methods text names Serpentine and the versions of Python, NumPy, SciPy, pandas and matplotlib used. Cite the software by name and link to <a href="https://github.com/Frizzell-5/Serpentine">github.com/Frizzell-5/Serpentine</a>.</p></details>
         <details><summary>Can I suggest a feature or report a bug?</summary><p>Yes. Open an issue on <a href="https://github.com/Frizzell-5/Serpentine/issues">GitHub</a>. Repeated-measures two-way ANOVA, axis breaks and direct LabChart file import are on the roadmap.</p></details>
       </div>
@@ -752,7 +806,7 @@ M2      KO         29.4
 
 <footer>
   <div class="wrap">
-    <span><b style="color:var(--ink)">Serpentine</b> v0.9 · Made by Shadan Alrawi</span>
+    <span><b style="color:var(--ink)">Serpentine</b> v1.0 · Made by Shadan Alrawi</span>
     <a href="https://github.com/Frizzell-5/Serpentine">GitHub</a>
     <a href="https://github.com/Frizzell-5/Serpentine/issues">Report an issue</a>
     <span class="sp">Built on Pyodide, NumPy, SciPy, pandas and matplotlib.</span>

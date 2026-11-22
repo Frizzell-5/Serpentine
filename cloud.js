@@ -32,6 +32,9 @@ const Cloud = (() => {
   let statusText = "";
   let pendingRecovery = null; // recovery key string to show once
   let stylesTimer = null;
+  let shares = [];
+  let shareResult = null; // {url, expires_at}
+  let shareDays = 30;
 
   // ---------------------------------------------------------------- bytes
   const toB64 = (bytes) => {
@@ -158,6 +161,41 @@ const Cloud = (() => {
       throw err;
     }
     return data;
+  }
+
+  // ---------------------------------------------------------------- share links
+  const b64url = (b) => toB64(b).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const fromB64url = (s) => fromB64(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4));
+  async function createShare() {
+    const raw = crypto.getRandomValues(new Uint8Array(32));
+    const key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt"]);
+    const { board, ...p } = projectPayload();
+    const payload = { ...p, board, sharedAt: Date.now() };
+    const data = toB64(await seal(key, await gzip(te.encode(JSON.stringify(payload)))));
+    const r = await api("shares", "POST", { data, days: shareDays });
+    return { url: `${location.origin}${location.pathname}#s=${r.id}.${b64url(raw)}`, expires_at: r.expires_at };
+  }
+  async function openShareFromHash() {
+    const m = location.hash.match(/^#s=([0-9a-f]{32})\.([A-Za-z0-9_-]{43})$/);
+    if (!m) return;
+    window.history.replaceState(null, "", location.pathname + location.search);
+    try {
+      const r = await api("share/" + m[1]);
+      const key = await crypto.subtle.importKey("raw", fromB64url(m[2]), "AES-GCM", false, ["decrypt"]);
+      const obj = JSON.parse(td.decode(await gunzip(await open(key, fromB64(r.data)))));
+      delete obj.sharedAt;
+      await openProjectObject(obj, `Opened a shared copy of “${obj.name || "a project"}”. It's yours to change; the original isn't affected. ${KEYS.mod}Z brings back what you had open.`);
+      state.cloudId = null;
+      state.cloudUpdated = null;
+      autosave();
+      setStatus("off");
+    } catch (e) {
+      toast(e.status === 404 ? e.message : e.offline ? e.message : "This share link is incomplete or damaged. Ask for the full link again.");
+    }
+  }
+  async function refreshShares() {
+    try { shares = (await api("shares")).shares; } catch (e) { shares = []; }
+    if (view === "share") render();
   }
 
   // ---------------------------------------------------------------- status
@@ -336,6 +374,7 @@ const Cloud = (() => {
   function openDialog(v) {
     view = v || (me ? (dek ? "projects" : "unlock") : "signin");
     notice = "";
+    if (view === "share") { shareResult = null; refreshShares(); }
     $("#cloud").hidden = false;
     document.body.classList.add("board-open");
     render();
@@ -435,6 +474,31 @@ const Cloud = (() => {
         <div class="btn-row"><button type="button" class="btn btn-small" data-cl="rk-copy">Copy</button><button type="button" class="btn btn-small" data-cl="rk-download">Download as a text file</button></div>
         <label class="cl-check"><input type="checkbox" id="cl-rk-ok"> I've saved my recovery key somewhere safe.</label>
         <div class="btn-row"><button type="button" class="btn btn-primary cl-primary" data-cl="rk-done" disabled>Continue</button></div>`;
+      return;
+    }
+    if (v === "share") {
+      title.textContent = "Share a link";
+      if (!me) {
+        body.innerHTML = `<p>Share links let a colleague open this exact analysis (data, settings, style and board) in their browser, no account needed on their side.</p>
+          <p class="fine">Sign in or create a free account to make links.</p>
+          <div class="btn-row"><button type="button" class="btn btn-primary cl-primary" data-cl="signin">Sign in</button><button type="button" class="btn" data-cl="signup">Create an account</button></div>`;
+        return;
+      }
+      const opt = (d, label) => `<option value="${d}"${shareDays === d ? " selected" : ""}>${label}</option>`;
+      body.innerHTML = `${note()}
+        <p>Anyone with the link can open a copy of <b>${esc(state.name)}</b> as it is now: data, settings, style and board. Changes they make don't affect yours.</p>
+        <div class="cl-share-row">
+          <div class="field"><label for="cl-days">Link works for</label><select id="cl-days">${opt(1, "1 day")}${opt(7, "7 days")}${opt(30, "30 days")}${opt(90, "90 days")}${opt(365, "1 year")}</select></div>
+          <button type="button" class="btn btn-primary cl-primary" data-cl="share-make"${busy ? " disabled" : ""}>${busy ? "Encrypting…" : shareResult ? "Make another link" : "Create link"}</button>
+        </div>
+        ${shareResult ? `<div class="cl-share-out"><input type="text" id="cl-share-url" readonly value="${esc(shareResult.url)}"><button type="button" class="btn btn-small btn-primary" data-cl="share-copy">Copy</button></div>
+          <span class="hint">Works until ${new Date(shareResult.expires_at).toLocaleDateString()}. Send the whole link: the part after # is the key.</span>` : ""}
+        <p class="fine cl-privacy"><b>Encrypted:</b> the project is encrypted on this computer with a new random key that exists only in the link (after the #). Browsers never send that part to the server, so the server can't read what you share.</p>
+        ${shares.length ? `<div class="section-title" style="margin-top:14px">Your links</div><div class="cl-list">${shares.map((sh) => `
+          <div class="cl-item" data-id="${esc(sh.id)}"><div class="cl-item-main"><b>Link made ${ago(sh.created_at)}</b>
+            <span class="fine">${fmtBytes(sh.size)} · opened ${sh.views} time${sh.views === 1 ? "" : "s"} · expires ${new Date(sh.expires_at).toLocaleDateString()}</span></div>
+            <div class="btn-row"><button type="button" class="btn btn-small" data-cl="share-del">Remove</button></div></div>`).join("")}</div>
+          <span class="hint">Removing a link stops it working immediately. Links can't be shown again, because the key is only in the link you copied.</span>` : ""}`;
       return;
     }
     if (v === "account") {
@@ -666,6 +730,26 @@ const Cloud = (() => {
       if (!b) return;
       const a = b.dataset.cl;
       const id = b.closest("[data-id]")?.dataset.id;
+      if (a === "share-make") {
+        if (busy) return;
+        busy = true; notice = ""; render();
+        try {
+          shareDays = Number($("#cl-days")?.value) || shareDays;
+          shareResult = await createShare();
+          busy = false;
+          render();
+          await copyText(shareResult.url, "Link copied. Paste it into an email or chat.");
+          $("#cl-share-url")?.select();
+          refreshShares();
+        } catch (err) { busy = false; notice = err.message; render(); }
+        return;
+      }
+      if (a === "share-copy") { $("#cl-share-url")?.select(); return copyText(shareResult.url, "Link copied"); }
+      if (a === "share-del") {
+        return armConfirm(b, "Remove?", async () => {
+          try { await api("shares/" + id, "DELETE"); toast("Link removed. It no longer works."); refreshShares(); } catch (err) { toast(err.message); }
+        });
+      }
       if (["signin", "signup", "forgot", "account", "projects"].includes(a)) {
         view = a;
         notice = "";
@@ -716,6 +800,7 @@ const Cloud = (() => {
   }
 
   bind();
-  init();
-  return { ready, changed, saveCurrent, stylesChanged, open: openDialog, get available() { return available; }, get email() { return me?.email; } };
+  init().then(openShareFromHash);
+  window.addEventListener("hashchange", openShareFromHash);
+  return { ready, changed, saveCurrent, stylesChanged, open: openDialog, share: () => openDialog("share"), get available() { return available; }, get email() { return me?.email; } };
 })();
