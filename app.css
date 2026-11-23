@@ -546,3 +546,14 @@ kbd { font: 500 11.5px var(--font-data); background: var(--stage); border: 1px s
 .cl-share-row .field { margin: 0; }
 .cl-share-out { display: flex; gap: 8px; margin-top: 12px; }
 .cl-share-out input { flex: 1; min-width: 0; font-family: var(--mono, ui-monospace, Menlo, monospace); font-size: 12px; }
+
+/* Reporting checklist */
+.checklist { list-style: none; margin: 8px 0 12px; padding: 0; display: grid; gap: 6px; }
+.checklist li { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+.checklist li div { display: grid; gap: 1px; } .checklist li div span { color: var(--muted); font-size: 12.5px; }
+.ck-icon { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+.ck-ok .ck-icon { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.ck-warn .ck-icon { background: #F6D7A7; color: #7A4B00; }
+.ck-info .ck-icon { background: var(--line); color: var(--muted); font-style: italic; font-family: Georgia, serif; }
+.ck-warn { border-color: #E9C98F !important; }
+.ex-link { justify-self: start; font-size: 12.5px; margin: -2px 0 4px; }

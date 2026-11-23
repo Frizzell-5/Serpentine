@@ -108,7 +108,7 @@ function armConfirm(btn, question, action) {
 // Defaults
 // ============================================================================
 const DEFAULT_SETTINGS = {
-  compare: { dataset: "", layout: "wide", columns: [], value_col: "", group_col: "", subject_col: "", group_order: "", y_name: "", normalize: "none", combine_headings: true, paired: false, test: "auto", equal_var: false, posthoc: "all", outliers: "keep", outlier_method: "grubbs" },
+  compare: { dataset: "", layout: "wide", columns: [], value_col: "", group_col: "", subject_col: "", nested_plot: "superplot", pair_replicates: true, effect_sizes: true, estimation: "none", group_order: "", y_name: "", normalize: "none", combine_headings: true, paired: false, test: "auto", equal_var: false, posthoc: "all", outliers: "keep", outlier_method: "grubbs" },
   timecourse: {
     time_col: "", time_unit: "seconds", value_col: "", valid_min: "", valid_max: "", filter_col: "", filter_min: "", filter_max: "",
     bin: 30, baseline_start: -5, baseline_end: 0, window_start: -10, window_end: 30, event_label: "Injection", norm: "pct",
@@ -374,7 +374,7 @@ const openSections = store(SECTIONS_KEY) || {};
 // Python engine (web worker)
 // ============================================================================
 const servedFromDisk = location.protocol === "file:";
-const worker = servedFromDisk ? null : new Worker("worker.js?v=1.0.0");
+const worker = servedFromDisk ? null : new Worker("worker.js?v=1.1.0");
 let engineReady = false;
 let reqId = 0;
 const pending = new Map();
@@ -580,7 +580,10 @@ function sameSnap(a, b) {
   return a.panels.every((p, i) => p === b.panels[i]);
 }
 const KEY_NAMES = { plot_kind: "plot type", ymin: "Y min", ymax: "Y max", xmin: "X min", xmax: "X max", logy: "log scale", logx: "log X", xrot: "label angle", dpi: "resolution",
-  custom_rc: "matplotlib settings", custom_code: "Python code", posthoc: "comparisons", y_name: "measurement name", ref_lines: "reference lines", panel_label: "panel letter" };
+  custom_rc: "matplotlib settings", custom_code: "Python code", posthoc: "comparisons", y_name: "measurement name", ref_lines: "reference lines", panel_label: "panel letter",
+  sig: "significance labels", show_ns: "non-significant labels", show_points: "individual points", error: "error bars", estimation: "estimation plot",
+  effect_sizes: "effect sizes", nested_plot: "SuperPlot", pair_replicates: "replicate pairing", subject_col: "subject column", show_subjects: "individual subjects",
+  sphericity: "sphericity correction", marker_cols: "markers", outcome_col: "outcome column", show_cutoff: "cut-off mark", show_trend: "trend line" };
 const keyName = (k) => KEY_NAMES[k] || k.replace(/_/g, " ");
 function changedKeys(a, b) {
   return [...new Set([...Object.keys(a || {}), ...Object.keys(b || {})])].filter((k) => JSON.stringify(a?.[k]) !== JSON.stringify(b?.[k]));
@@ -771,7 +774,7 @@ async function addFiles(files) {
 async function loadExample(kind) {
   if (!engineReady) {
     queuedExample = kind;
-    state.analysis = kind;
+    if (ANALYSES.some((a) => a.id === kind)) state.analysis = kind;
     renderPanels();
     toast("The example will open when Python is ready.");
     return;
@@ -779,6 +782,8 @@ async function loadExample(kind) {
   const out = await call("example", { kind });
   if (out.error) return toast(out.error);
   const ex = out.ok;
+  const title = ex.title || null;
+  kind = ex.analysis || kind;
   state.analysis = kind;
   state.cloudId = null; // an example never overwrites a project saved online
   state.cloudUpdated = null;
@@ -788,7 +793,7 @@ async function loadExample(kind) {
   state.settings[kind] = { ...DEFAULT_SETTINGS[kind], ...ex.settings };
   state.style.groups = {};
   state.example = kind;
-  state.name = "Example · " + ANALYSES.find((a) => a.id === kind).title;
+  state.name = "Example · " + (title || ANALYSES.find((a) => a.id === kind).title);
   $("#example-badge").hidden = false;
   await Promise.all(state.datasets.map((d) => inspectNow(d.id)));
   renderAll();
@@ -801,6 +806,7 @@ async function loadExample(kind) {
 // ============================================================================
 const sec = (title, x = {}) => ({ type: "section", title, ...x });
 const note = (text) => ({ type: "note", text });
+const exampleLink = (kind, text) => ({ type: "exlink", kind, text });
 const row = (...fields) => ({ type: "row", fields: fields.filter(Boolean) });
 const sel = (key, label, options, x = {}) => ({ type: "select", key, label, options, ...x });
 const seg = (key, label, options, x = {}) => ({ type: "seg", key, label, options, ...x });
@@ -834,6 +840,8 @@ function fieldHTML(f, obj, scope) {
   switch (f.type) {
     case "note":
       return `<span class="hint">${esc(f.text)}</span>`;
+    case "exlink":
+      return `<button type="button" class="link-btn ex-link" data-load-example="${esc(f.kind)}">${esc(f.text)}</button>`;
     case "row":
       return `<div class="row${f.fields.length === 3 ? " row-3" : ""}${f.fields.length === 4 ? " row-4" : ""}">${f.fields.map((x) => fieldHTML(x, obj, scope)).join("")}</div>`;
     case "select":
@@ -1128,7 +1136,10 @@ const SETTINGS_SCHEMA = {
       s.layout !== "long" && cols("columns", "Groups to include", c.numeric, "Leave all unchecked to use every numeric column."),
       s.layout !== "long" && c.numeric.some((n) => n.includes(" · ")) && tog("combine_headings", "Combine columns under the same heading", "For Prism-style tables where each group has several replicate columns."),
       s.layout === "long" && row(col("value_col", "Value column", c.numeric), col("group_col", "Group column", c.all)),
-      s.layout === "long" && col("subject_col", "Replicates nested in", c.all, { none: true, hint: "If each animal, culture or well was measured several times, pick its ID column. Replicates are averaged per subject so the statistics count biological replicates (no pseudoreplication)." }),
+      s.layout === "long" && col("subject_col", "Replicates nested in", c.all, { none: true, hint: "If each animal, culture or well was measured several times, or cells come from a few experiments, pick the ID column. Measurements are averaged per subject or experiment so the statistics count biological replicates (no pseudoreplication)." }),
+      s.layout === "long" && !s.subject_col && exampleLink("superplot", "Cells or wells from several experiments? Open the SuperPlot example"),
+      s.layout === "long" && s.subject_col && seg("nested_plot", "Show", [["superplot", "SuperPlot"], ["means", "Subject means only"]]),
+      s.layout === "long" && s.subject_col && tog("pair_replicates", "Pair replicates across groups", "When every experiment appears in every group, compare them as matched pairs (recommended for SuperPlots)."),
       txt("group_order", "Group order", { placeholder: "e.g. Control, Low, High", hint: "Optional. Groups you leave out keep their table order." }),
       txt("y_name", "Measurement name", { placeholder: "e.g. Tumor volume (mm³)", hint: "Becomes the value-axis label." }),
       sel("normalize", "Express values as", [["none", "As entered"], ["pct_control", "% of the first group's mean"], ["fold_control", "Fold of the first group's mean"], ["delta_control", "Difference from the first group's mean"]], { hint: "The first group (see Group order) is treated as the control." }),
@@ -1137,6 +1148,9 @@ const SETTINGS_SCHEMA = {
       sel("test", "Test", TEST_OPTIONS),
       !(s.paired && s.layout !== "long") && s.test !== "nonparam" && tog("equal_var", "Assume equal variances", "Off applies Welch's correction (recommended)."),
       sel("posthoc", "Multiple comparisons", POSTHOC_OPTIONS, { hint: "Used when there are 3 or more groups." }),
+      sec("Effect sizes"),
+      tog("effect_sizes", "Report effect sizes with 95% CIs", "Mean differences with t and bootstrap intervals, Hedges' g, and η² for ANOVA. Asked for by ARRIVE and most journals."),
+      sel("estimation", "Estimation plot", [["none", "None"], ["cumming", "Cumming plot (differences below)"], ["gardner", "Gardner-Altman (2 groups, difference alongside)"]], { hint: "Adds a figure showing each difference from the first group with its bootstrap 95% CI." }),
       sec("Outliers"),
       sel("outliers", "Possible outliers", [["keep", "Don't check"], ["flag", "Find and list them"], ["remove", "Find and remove them"]], { hint: "Removing outliers should be decided before looking at the results, and reported." }),
       s.outliers !== "keep" && sel("outlier_method", "Method", [["grubbs", "Grubbs' test (alpha 0.05, assumes normal data)"], ["iqr", "Tukey's fences (beyond 1.5 × IQR)"]]),
@@ -1716,7 +1730,7 @@ function renderAll() {
   $("#example-badge").hidden = !state.example;
   renderPanels();
   $$(".rtab").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.rtab === state.rtab)));
-  ["tables", "methods", "python"].forEach((t) => ($("#rpanel-" + t).hidden = t !== state.rtab));
+  ["tables", "methods", "python", "checklist"].forEach((t) => ($("#rpanel-" + t).hidden = t !== state.rtab));
   renderUndo();
 }
 
@@ -1816,6 +1830,7 @@ function renderResults(out) {
     <p class="methods-text">Download a Python script that reproduces this exact analysis: your data, settings and style are built in, including any Python code you added. Anyone can rerun it with <code>pip install numpy scipy pandas matplotlib</code> and <code>python script.py</code>. Useful for reviewers, lab records and going beyond the menus.</p>
     <div><button type="button" class="btn btn-primary btn-small" id="btn-script">Download Python script</button></div>
     <pre class="code-peek">${esc(scriptPeek())}</pre>`;
+  renderChecklist(r);
   $("#results").hidden = false;
   if (firstResult || groupsChanged) renderCommandBar();
   $("#command-form").hidden = false;
@@ -1883,6 +1898,64 @@ function saveProject() {
   if (typeof Cloud !== "undefined" && Cloud.ready()) return Cloud.saveCurrent();
   downloadProject();
 }
+// Reporting checklist: the current result against ARRIVE 2.0, SAMPL and NIH/journal statistics requirements.
+function checklistItems(r) {
+  const S = state.settings[state.analysis] || {};
+  const st = state.style;
+  const items = [];
+  const add = (status, title, detail, fix) => items.push({ status, title, detail, fix });
+  const titles = r.tables.map((t) => t.title);
+  const text = r.summary.map((s) => s.value).join(" ");
+  const groupPlot = GROUP_PLOTS.has(state.analysis);
+  const hasTest = r.summary.some((s) => s.p !== null && s.p !== undefined);
+  const smallN = r.notes.some((n) => /n < 5|Small samples/i.test(n));
+  if (titles.some((t) => /Descriptive|Unknown samples|Kaplan|Contingency|Required/i.test(t)) || /\bn = \d/.test(text)) add("ok", "Exact n for each group", "Listed in the results tables. Put it in the figure legend too.");
+  else add("info", "Exact n for each group", "State the number of independent subjects in every group (ARRIVE 2.0 item 2).");
+  if (r.methods) add("ok", "Statistical methods described", "The Methods text names each test, correction and software version (ARRIVE item 7).");
+  if (hasTest) {
+    add("ok", "Exact p values", "The results give exact p values, down to p < 0.0001.");
+    if (groupPlot && (st.sig || "stars") === "stars") add("warn", "Figure shows stars instead of p values", "Many journals prefer exact p values on the figure or in its legend.", { label: "Show p values", kind: "style", key: "sig", value: "p" });
+  }
+  const hasEffect = titles.some((t) => /Effect size|effect size/.test(t)) || /CI|confidence|η²|hazard ratio|odds ratio|AUC|bias/i.test(text);
+  if (hasEffect) add("ok", "Effect size with 95% CI", "Reported, as ARRIVE item 16 and the SAMPL guidelines ask, not just a p value.");
+  else if (state.analysis === "compare" && S.effect_sizes === false) add("warn", "Effect size with 95% CI", "A p value alone doesn't show how big the difference is.", { label: "Report effect sizes", kind: "settings", key: "effect_sizes", value: true });
+  else if (hasTest) add("info", "Effect size with 95% CI", "Report the size of each effect with its confidence interval (ARRIVE item 16).");
+  if (groupPlot) {
+    const pts = st.show_points || ["dot", "beeswarm", "strip", "raincloud"].includes(st.plot_kind);
+    if (pts || (state.analysis === "compare" && S.subject_col && S.nested_plot !== "means")) add("ok", "Individual data points shown", "Readers can see the distribution and n.");
+    else add(smallN ? "warn" : "info", "Individual data points shown", (smallN ? "With small samples, " : "") + "bar graphs alone can hide very different data. eLife, JCB, Nature and others ask for the points.", { label: "Show the points", kind: "style", key: "show_points", value: true });
+    if ((st.error || "sem") === "sem" && !["box", "violin", "boxviolin", "raincloud", "beeswarm", "strip"].includes(st.plot_kind)) add("info", "Error bars: SEM", "SEM shows how precisely the mean is known, not how variable the data are. Say which you used in the legend, or show SD for spread.", { label: "Use SD", kind: "style", key: "error", value: "sd" });
+    else add("ok", "Error bars defined", "The Methods text says what the bars or boxes show.");
+  }
+  if (titles.some((t) => /Normality/.test(t))) add("ok", "Assumptions checked", "Normality was tested before choosing the test.");
+  if (titles.some((t) => /Multiple comparisons/.test(t))) add("ok", "Multiple comparisons corrected", "Adjusted p values are reported.");
+  if (state.analysis === "compare") {
+    if (S.layout === "long" && S.subject_col) add("ok", "Biological replicates", "Technical replicates are averaged within each subject or experiment, so n counts independent units.");
+    else {
+      const big = (r.tables[0]?.rows || []).some((row) => Number(row[1]) >= 30);
+      if (big) add("warn", "Are these biological replicates?", "Groups have 30 or more values. If they are cells or wells from a few experiments, the true n is the number of experiments. Use the values + group layout with an experiment column (SuperPlot).");
+    }
+    if (S.outliers === "remove") add("warn", "Outliers removed", "Report how many were removed and the rule used, decided before seeing the results (ARRIVE item 3).");
+    else add("ok", "No data excluded", S.outliers === "flag" ? "Possible outliers were listed but kept." : "All values are included.");
+  }
+  if (state.analysis !== "power") add("info", "Sample size justification", "State how the sample size was chosen (ARRIVE item 2b). Sample size & power can write the paragraph for you.");
+  add("ok", "Reproducible", "Download the Python script and the CSV tables as supplementary material, or send a share link to a reviewer.");
+  return items;
+}
+function renderChecklist(r) {
+  const items = checklistItems(r);
+  const n = { ok: items.filter((i) => i.status === "ok").length, warn: items.filter((i) => i.status === "warn").length };
+  const icon = { ok: "✓", warn: "!", info: "i" };
+  $("#rpanel-checklist").innerHTML = `
+    <p class="methods-text">How this result measures up to common reporting standards (ARRIVE 2.0, SAMPL, NIH and journal statistics checklists). ${n.ok} of ${items.length} met${n.warn ? `, ${n.warn} worth fixing` : ""}.</p>
+    <ul class="checklist">${items.map((it, i) => `<li class="ck-${it.status}"><span class="ck-icon" aria-hidden="true">${icon[it.status]}</span>
+      <div><b>${esc(it.title)}</b><span>${esc(it.detail)}</span></div>
+      ${it.fix ? `<button type="button" class="btn btn-small" data-ckfix="${i}">${esc(it.fix.label)}</button>` : ""}</li>`).join("")}</ul>
+    <div><button type="button" class="btn btn-small" id="btn-copy-checklist">Copy checklist</button></div>
+    <span class="hint">A guide, not a guarantee. Check your journal's own author instructions.</span>`;
+  $("#rpanel-checklist")._items = items;
+}
+
 // One-click report: everything about the current analysis on one printable page.
 function reportHTML() {
   const r = lastResult;
@@ -1927,6 +2000,13 @@ ${r.figures.map((f, i) => `<figure>${f.svg.replace(/id="([^"]+)"/g, `id="f${i}_$
 <h2>Tables</h2>${tables}
 </main></body></html>`;
 }
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-load-example]");
+  if (!b) return;
+  const go = () => loadExample(b.dataset.loadExample);
+  if (state.datasets.length && !state.example) armConfirm(b, "Replace your tables?", go);
+  else go();
+});
 function openReport() {
   if (!lastResult) return toast("Run an analysis first.");
   const html = reportHTML();
@@ -2432,13 +2512,28 @@ function bindEvents() {
     }
     if (e.target.closest("#btn-copy-methods") && lastResult) return copyText(lastResult.methods, "Methods text copied");
     if (e.target.closest("#btn-report")) return openReport();
+    const fx = e.target.closest("[data-ckfix]");
+    if (fx) {
+      const it = $("#rpanel-checklist")._items?.[Number(fx.dataset.ckfix)];
+      if (!it?.fix) return;
+      if (it.fix.kind === "style") state.style[it.fix.key] = it.fix.value;
+      else state.settings[state.analysis][it.fix.key] = it.fix.value;
+      renderSettings();
+      renderStyle();
+      changed();
+      return toast("Done: " + it.fix.label.toLowerCase());
+    }
+    if (e.target.closest("#btn-copy-checklist")) {
+      const its = $("#rpanel-checklist")._items || [];
+      return copyText(its.map((i) => `[${i.status === "ok" ? "x" : " "}] ${i.title}: ${i.detail}`).join("\n"), "Checklist copied");
+    }
     if (e.target.closest("#btn-share")) return typeof Cloud !== "undefined" ? Cloud.share() : toast("Share links need Serpentine's main site.");
     if (e.target.closest("#btn-script")) return downloadScript();
     const rt = e.target.closest(".rtab");
     if (rt) {
       state.rtab = rt.dataset.rtab;
       $$(".rtab").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.rtab === state.rtab)));
-      ["tables", "methods", "python"].forEach((t) => ($("#rpanel-" + t).hidden = t !== state.rtab));
+      ["tables", "methods", "python", "checklist"].forEach((t) => ($("#rpanel-" + t).hidden = t !== state.rtab));
       autosave();
     }
   });

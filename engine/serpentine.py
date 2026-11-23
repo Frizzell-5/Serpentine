@@ -26,13 +26,14 @@ from matplotlib.patches import FancyBboxPatch, Patch  # noqa: E402
 from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.colors import to_rgba, to_rgb, to_hex  # noqa: E402
 from matplotlib.ticker import FuncFormatter, MultipleLocator, FormatStrFormatter, LogLocator, NullFormatter, MaxNLocator  # noqa: E402
+import warnings  # noqa: E402
 import scipy  # noqa: E402
 from scipy import stats  # noqa: E402
-from scipy.optimize import curve_fit  # noqa: E402
+from scipy.optimize import curve_fit, brentq  # noqa: E402
 
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
-ENGINE_VERSION = "1.0.0"
+ENGINE_VERSION = "1.1.0"
 
 
 class UserError(Exception):
@@ -834,7 +835,7 @@ def _polish(fig, s, notes):
             _round_bars(ax, s)
         _effects(ax, s)
         try:
-            for axis, val, label in _parse_ref_lines(s["ref_lines"]):
+            for axis, val, label in ([] if getattr(ax, "_ll_noref", False) else _parse_ref_lines(s["ref_lines"])):
                 kw = dict(color=to_rgba(s["fg"], 0.55), lw=max(0.6, s["line_width"] * 0.6), ls=(0, (4, 3)), zorder=1)
                 if val == "x":
                     (x0, x1), (y0, y1) = ax.get_xlim(), ax.get_ylim()
@@ -1529,6 +1530,348 @@ def _group_figure(names, values, s, res, paired, ylabel, title="", width=None):
     return fig
 
 
+# ----------------------------------------------------------------------------
+# Effect sizes with confidence intervals (ARRIVE / SAMPL reporting)
+# ----------------------------------------------------------------------------
+
+N_BOOT = 5000
+
+
+def _boot_diffs(a, b, paired, n_boot=N_BOOT, seed=12345):
+    """Bootstrap distribution of mean(b) - mean(a). Fixed seed: the same data always give the same interval."""
+    rng = np.random.default_rng(seed)
+    if paired:
+        d = b - a
+        idx = rng.integers(0, len(d), (n_boot, len(d)))
+        return d[idx].mean(axis=1)
+    ia = rng.integers(0, len(a), (n_boot, len(a)))
+    ib = rng.integers(0, len(b), (n_boot, len(b)))
+    return b[ib].mean(axis=1) - a[ia].mean(axis=1)
+
+
+def _bca_ci(a, b, paired, boots, level=0.95):
+    """Bias-corrected and accelerated bootstrap interval (as in DABEST)."""
+    obs = (np.mean(b - a) if paired else np.mean(b) - np.mean(a))
+    prop = np.mean(boots < obs)
+    if prop <= 0 or prop >= 1:
+        lo, hi = np.percentile(boots, [(1 - level) / 2 * 100, (1 + level) / 2 * 100])
+        return float(lo), float(hi)
+    z0 = stats.norm.ppf(prop)
+    if paired:
+        d = b - a
+        jack = np.array([np.mean(np.delete(d, i)) for i in range(len(d))])
+    else:
+        ja = [np.mean(b) - np.mean(np.delete(a, i)) for i in range(len(a))]
+        jb = [np.mean(np.delete(b, i)) - np.mean(a) for i in range(len(b))]
+        jack = np.array(ja + jb)
+    jm = jack.mean()
+    num = ((jm - jack) ** 3).sum()
+    den = 6.0 * (((jm - jack) ** 2).sum() ** 1.5)
+    acc = num / den if den > 0 else 0.0
+    out = []
+    for q in ((1 - level) / 2, (1 + level) / 2):
+        z = stats.norm.ppf(q)
+        adj = stats.norm.cdf(z0 + (z0 + z) / (1 - acc * (z0 + z)))
+        out.append(float(np.percentile(boots, min(100, max(0, adj * 100)))))
+    return out[0], out[1]
+
+
+def _hedges_g_ci(a, b, paired):
+    """Hedges' g (or paired g_av-free dz-style) with an approximate 95% CI from its standard error."""
+    n1, n2 = len(a), len(b)
+    if paired:
+        d = b - a
+        sd = np.std(d, ddof=1)
+        if not sd > 0:
+            return np.nan, np.nan, np.nan
+        dz = np.mean(d) / sd
+        J = 1 - 3 / (4 * (n1 - 1) - 1)
+        g = dz * J
+        se = math.sqrt(1 / n1 + g ** 2 / (2 * n1))
+        crit = stats.t.ppf(0.975, n1 - 1)
+    else:
+        sp = math.sqrt(((n1 - 1) * np.var(a, ddof=1) + (n2 - 1) * np.var(b, ddof=1)) / (n1 + n2 - 2))
+        if not sp > 0:
+            return np.nan, np.nan, np.nan
+        J = 1 - 3 / (4 * (n1 + n2) - 9)
+        g = (np.mean(b) - np.mean(a)) / sp * J
+        se = math.sqrt((n1 + n2) / (n1 * n2) + g ** 2 / (2 * (n1 + n2)))
+        crit = stats.t.ppf(0.975, n1 + n2 - 2)
+    return float(g), float(g - crit * se), float(g + crit * se)
+
+
+def _eta_sq_ci(F, df1, df2, level=0.95):
+    """Partial eta squared with a CI by inverting the noncentral F distribution."""
+    if not np.isfinite(F) or F <= 0:
+        return np.nan, np.nan
+    def lam_for(q):
+        f = lambda lam: stats.ncf.cdf(F, df1, df2, lam) - q
+        if f(0) < 0:
+            return 0.0
+        hi = max(10.0, F * df1 * 4)
+        while f(hi) > 0 and hi < 1e7:
+            hi *= 2
+        return brentq(f, 0, hi)
+    N = df1 + df2 + 1
+    with warnings.catch_warnings(), np.errstate(all="ignore"):
+        warnings.simplefilter("ignore")
+        lam_lo, lam_hi = lam_for((1 + level) / 2), lam_for((1 - level) / 2)
+    return lam_lo / (lam_lo + N), lam_hi / (lam_hi + N)
+
+
+def effect_size_table(names, vals, res, paired):
+    """Mean differences with bootstrap and t intervals, standardized effects, and an overall effect for k > 2."""
+    rows, summary = [], []
+    vals = [np.asarray(v, float) for v in vals]
+    if paired:
+        mat = np.column_stack(vals)
+        mat = mat[np.isfinite(mat).all(axis=1)]
+        vals = [mat[:, j] for j in range(mat.shape[1])]
+    else:
+        vals = [v[np.isfinite(v)] for v in vals]
+    k = len(vals)
+    if k < 2 or min(len(v) for v in vals) < 2:
+        return None, []
+    pairs = [(i, j) for i, j, _ in res.get("pairs", [])] or [(0, j) for j in range(1, k)]
+    for i, j in pairs:
+        a, b = vals[i], vals[j]
+        diff = float(np.mean(b - a)) if paired else float(np.mean(b) - np.mean(a))
+        if paired:
+            d = b - a
+            se = np.std(d, ddof=1) / math.sqrt(len(d))
+            t = stats.t.ppf(0.975, len(d) - 1)
+        else:
+            va, vb = np.var(a, ddof=1) / len(a), np.var(b, ddof=1) / len(b)
+            se = math.sqrt(va + vb)
+            dfw = (va + vb) ** 2 / ((va ** 2 / (len(a) - 1) if len(a) > 1 else 0) + (vb ** 2 / (len(b) - 1) if len(b) > 1 else 0)) if va + vb > 0 else len(a) + len(b) - 2
+            t = stats.t.ppf(0.975, dfw)
+        boots = _boot_diffs(a, b, paired)
+        blo, bhi = _bca_ci(a, b, paired, boots)
+        g, glo, ghi = _hedges_g_ci(a, b, paired)
+        pct = diff / abs(np.mean(a)) * 100 if np.mean(a) != 0 else np.nan
+        if paired:
+            pos = np.sum(b - a > 0) + 0.5 * np.sum(b - a == 0)
+            rb = float((2 * pos / len(a)) - 1)
+        else:
+            U = stats.mannwhitneyu(b, a, alternative="two-sided").statistic
+            rb = float(2 * U / (len(a) * len(b)) - 1)
+        rows.append(["%s − %s" % (names[j], names[i]), _r(diff), _r(diff - t * se), _r(diff + t * se), _r(blo), _r(bhi),
+                     _r(pct, 4), _r(g, 4), _r(glo, 4), _r(ghi, 4), _r(rb, 4)])
+    first = rows[0]
+    if k == 2:
+        summary.append({"label": "Effect size", "value": "%s − %s = %s (95%% CI %s to %s); Hedges' g = %s (%s to %s)" % (
+            names[1], names[0], _fmt(first[1]), _fmt(first[4]), _fmt(first[5]), _fmt(first[7]), _fmt(first[8]), _fmt(first[9])), "p": None})
+    table = {"title": "Effect sizes (95% CI)", "columns": [
+        "Comparison", "Mean difference", "CI low (t)", "CI high (t)", "CI low (bootstrap BCa)", "CI high (bootstrap BCa)",
+        "% difference", "Hedges' g", "g CI low", "g CI high", "Rank-biserial r"], "rows": rows}
+    if k > 2 and res.get("test") == "One-way ANOVA":
+        N = sum(len(v) for v in vals)
+        F = stats.f_oneway(*vals).statistic
+        df1, df2 = k - 1, N - k
+        ss_b = sum(len(v) * (np.mean(v) - np.mean(np.concatenate(vals))) ** 2 for v in vals)
+        ss_w = sum(((v - np.mean(v)) ** 2).sum() for v in vals)
+        eta = ss_b / (ss_b + ss_w) if ss_b + ss_w > 0 else np.nan
+        omega = (ss_b - df1 * ss_w / df2) / (ss_b + ss_w + ss_w / df2) if df2 > 0 else np.nan
+        lo, hi = _eta_sq_ci(F, df1, df2)
+        summary.append({"label": "Effect size", "value": "η² = %.3f (95%% CI %.3f to %.3f), ω² = %.3f" % (eta, lo, hi, max(0.0, omega)), "p": None})
+        table["overall"] = ["η²", _r(eta, 4), _r(lo, 4), _r(hi, 4), "ω²", _r(max(0.0, omega), 4)]
+    elif k > 2 and res.get("test") == "Kruskal-Wallis test":
+        N = sum(len(v) for v in vals)
+        H = stats.kruskal(*vals).statistic
+        eps = H * (N + 1) / (N ** 2 - 1)
+        summary.append({"label": "Effect size", "value": "ε² = %.3f (rank-based)" % eps, "p": None})
+    return table, summary
+
+
+# ----------------------------------------------------------------------------
+# Estimation plots (Gardner-Altman, Cumming) and SuperPlots
+# ----------------------------------------------------------------------------
+
+def _half_violin(ax, x, data, color, width=0.32, side=1):
+    data = data[np.isfinite(data)]
+    if len(data) < 5 or np.ptp(data) == 0:
+        return
+    kde = stats.gaussian_kde(data)
+    ys = np.linspace(data.min(), data.max(), 160)
+    dens = kde(ys)
+    dens = dens / dens.max() * width
+    ax.fill_betweenx(ys, x, x + side * dens, color=to_rgba(color, 0.35), lw=0, zorder=2)
+
+
+def _raw_points(ax, x, v, color, s, rng, spread=0.22, span=None, n_groups=3):
+    v = v[np.isfinite(v)]
+    offs = _swarm_offsets(v, s, n_groups, span or max(np.ptp(v), 1e-9) * 1.2, False) if len(v) else []
+    if len(v) and np.max(np.abs(offs)) > spread:
+        offs = np.asarray(offs) * spread / np.max(np.abs(offs))
+    ax.scatter(x + np.asarray(offs), v, s=s["marker_size"] ** 2, color=to_rgba(color, s["point_alpha"]),
+               edgecolor=_point_edge(s, color), linewidth=s["point_edge_width"], zorder=4, marker=s["point_shape"] or "o")
+
+
+def _mean_sd_gap(ax, x, v, s, color):
+    """DABEST-style summary: a vertical SD line broken by a gap at the mean."""
+    v = v[np.isfinite(v)]
+    if len(v) < 2:
+        return
+    m, sd = np.mean(v), np.std(v, ddof=1)
+    gap = sd * 0.12
+    kw = dict(color=s["fg"], lw=max(1.0, s["line_width"] * 1.1), zorder=5, solid_capstyle="butt")
+    ax.plot([x, x], [m - sd, m - gap], **kw)
+    ax.plot([x, x], [m + gap, m + sd], **kw)
+
+
+def estimation_figure(names, vals, s, paired, ylabel, kind="cumming", contrast_label=""):
+    """Raw data on top (or left), bootstrap distributions of the mean difference vs the first group below (or right)."""
+    G = _gstyles(s, names)
+    k = len(names)
+    vals = [np.asarray(v, float) for v in vals]
+    if paired:
+        mat = np.column_stack(vals)
+        mat = mat[np.isfinite(mat).all(axis=1)]
+        vals = [mat[:, j] for j in range(k)]
+    else:
+        vals = [v[np.isfinite(v)] for v in vals]
+    rng = np.random.default_rng(3)
+    contrast_label = contrast_label or ("Paired mean difference" if paired else "Mean difference")
+    ok = [j for j in range(1, k) if len(vals[0]) >= 2 and len(vals[j]) >= 2]
+    boots = {j: _boot_diffs(vals[0], vals[j], paired) for j in ok}
+    cis = {j: _bca_ci(vals[0], vals[j], paired, boots[j]) for j in ok}
+    diffs = {j: float(np.mean(vals[j] - vals[0])) if paired else float(np.mean(vals[j]) - np.mean(vals[0])) for j in ok}
+    lw = s["line_width"]
+    with plt.rc_context(_rc(s)):
+        if kind == "gardner" and k == 2:
+            fig = plt.figure(figsize=(s["width"] * 1.25, s["height"]))
+            gs = fig.add_gridspec(1, 2, width_ratios=[2, 1], wspace=0.08)
+            ax = fig.add_subplot(gs[0, 0])
+            ax2 = fig.add_subplot(gs[0, 1])
+        else:
+            fig = plt.figure(figsize=(max(s["width"], 0.9 * k + 1.2), s["height"] * 1.55))
+            gs = fig.add_gridspec(2, 1, height_ratios=[3, 2], hspace=0.42)
+            ax = fig.add_subplot(gs[0, 0])
+            ax2 = fig.add_subplot(gs[1, 0])
+        xs = np.arange(k, dtype=float)
+        if paired:
+            for r in range(len(vals[0])):
+                ax.plot(xs, [v[r] for v in vals], color=to_rgba(s["fg"], 0.35), lw=max(0.6, lw * 0.6), zorder=2)
+        allv = np.concatenate(vals) if vals else np.array([0.0])
+        span = max(np.ptp(allv), 1e-9) * 1.2
+        for x, g, v in zip(xs, G, vals):
+            _raw_points(ax, x, v, g["color"], s, rng, span=span, n_groups=k)
+            if not paired:
+                _mean_sd_gap(ax, x + 0.28, v, s, g["color"])
+        ax.set_xticks(xs)
+        ax.set_xticklabels(["%s\nn = %d" % (g["label"], len(v)) for g, v in zip(G, vals)])
+        ax.set_xlim(-0.6, k - 0.4)
+        ax.set_ylabel(ylabel)
+        if kind == "gardner" and k == 2 and 1 in ok:
+            j = 1
+            m0, m1 = np.mean(vals[0]), np.mean(vals[1])
+            for m, x in ((m0, 0), (m1, 1)):
+                ax.axhline(m, xmin=0, xmax=1, color=to_rgba(s["fg"], 0.4), lw=max(0.5, lw * 0.5), ls=(0, (2, 2)), zorder=1)
+            y0, y1 = ax.get_ylim()
+            ax2.set_ylim(y0 - m0, y1 - m0)
+            _half_violin(ax2, 0.0, boots[j], G[1]["color"], width=0.5)
+            ax2.plot([0, 0], cis[j], color=s["fg"], lw=lw * 1.6, zorder=4, solid_capstyle="butt")
+            ax2.scatter([0], [diffs[j]], s=(s["marker_size"] * 1.6) ** 2, color=s["fg"], zorder=5)
+            ax2.axhline(0, color=to_rgba(s["fg"], 0.6), lw=max(0.6, lw * 0.6), zorder=1)
+            ax2.axhline(diffs[j], color=to_rgba(s["fg"], 0.4), lw=max(0.5, lw * 0.5), ls=(0, (2, 2)), zorder=1)
+            ax2.set_xlim(-0.6, 0.8)
+            ax2.set_xticks([0])
+            ax2.set_xticklabels(["%s\nminus\n%s" % (G[1]["label"], G[0]["label"])])
+            ax2.yaxis.tick_right()
+            ax2.yaxis.set_label_position("right")
+            ax2.set_ylabel(contrast_label)
+        else:
+            for j in ok:
+                _half_violin(ax2, xs[j], boots[j], G[j]["color"], width=0.38)
+                ax2.plot([xs[j], xs[j]], cis[j], color=s["fg"], lw=lw * 1.6, zorder=4, solid_capstyle="butt")
+                ax2.scatter([xs[j]], [diffs[j]], s=(s["marker_size"] * 1.6) ** 2, color=s["fg"], zorder=5)
+            ax2.axhline(0, color=to_rgba(s["fg"], 0.6), lw=max(0.6, lw * 0.6), zorder=1)
+            ax2.set_ylabel("%s\nvs %s" % (contrast_label, G[0]["label"]))
+            ax2.set_xticks(xs)
+            ax2.set_xticklabels(["" if j == 0 else "%s\nminus\n%s" % (G[j]["label"], G[0]["label"]) for j in range(k)])
+            ax2.set_xlim(-0.6, k - 0.4)
+        for a_ in (ax, ax2):
+            a_._ll_noref = a_ is ax2
+            a_.set_facecolor(s["ax_bg"])
+            a_.tick_params(colors=s["fg"])
+            for sp in a_.spines.values():
+                sp.set_color(s["fg"])
+        if s.get("title"):
+            ax.set_title(s["title"])
+    rows = [[G[j]["label"] + " − " + G[0]["label"], _r(diffs[j]), _r(cis[j][0]), _r(cis[j][1]), len(boots[j])] for j in ok]
+    return fig, rows
+
+
+def _subject_palette(s, n):
+    """Distinct colours for replicates, independent of the group colours."""
+    cmap = plt.get_cmap("tab10" if n <= 10 else "tab20")
+    return [cmap(i % cmap.N) for i in range(n)]
+
+
+def superplot_figure(names, tech, subjects_order, s, ylabel, paired, means):
+    """SuperPlot (Lord et al. 2020): every measurement, coloured by its replicate, with replicate means on top.
+
+    tech: per group, list of (subject, values array). means: per group, array of replicate means in subjects_order."""
+    G = _gstyles(s, names)
+    k = len(names)
+    subj_list = list(subjects_order)
+    pal = _subject_palette(s, len(subj_list))
+    col = {sid: pal[i] for i, sid in enumerate(subj_list)}
+    markers = ["o", "s", "^", "D", "v", "P", "X", "*", "h", "<", ">", "p"]
+    mk = {sid: markers[i % len(markers)] for i, sid in enumerate(subj_list)}
+    fig, ax = _new_fig(s, max(s["width"], 0.75 * k + 1.4))
+    rng = np.random.default_rng(11)
+    ms = s["marker_size"]
+    with plt.rc_context(_rc(s)):
+        allv = np.concatenate([v for grp in tech for _, v in grp if len(v)]) if any(len(v) for grp in tech for _, v in grp) else np.array([0.0])
+        span = max(np.ptp(allv), 1e-9)
+        for x, grp in enumerate(tech):
+            pooled = np.concatenate([v for _, v in grp]) if grp else np.array([])
+            if s.get("plot_kind") in ("violin", "boxviolin", "raincloud") and len(pooled) > 4 and np.ptp(pooled) > 0:
+                parts = ax.violinplot([pooled], positions=[x], widths=0.8, showextrema=False)
+                for b in parts["bodies"]:
+                    b.set_facecolor(to_rgba(G[x]["color"], 0.12))
+                    b.set_edgecolor(to_rgba(s["fg"], 0.35))
+                    b.set_linewidth(max(0.5, s["line_width"] * 0.5))
+            if len(pooled):
+                kde_w = None
+                if len(pooled) > 4 and np.ptp(pooled) > 0:
+                    kde = stats.gaussian_kde(pooled)
+                    kde_w = kde(pooled) / kde(pooled).max()
+            idx = 0
+            for sid, v in grp:
+                w = kde_w[idx:idx + len(v)] if kde_w is not None else np.ones(len(v))
+                idx += len(v)
+                jit = (rng.random(len(v)) - 0.5) * 0.62 * (0.35 + 0.65 * w)
+                ax.scatter(x + jit, v, s=(ms * 0.75) ** 2, color=to_rgba(col[sid], 0.45), edgecolor="none", zorder=3, marker=mk[sid])
+        for x in range(k):
+            for sid, m in zip(subj_list, means[x]):
+                if np.isfinite(m):
+                    ax.scatter([x], [m], s=(ms * 1.9) ** 2, color=col[sid], edgecolor=s["fg"], linewidth=max(0.6, s["line_width"] * 0.6), zorder=6, marker=mk[sid])
+            mv = np.asarray(means[x], float)
+            mv = mv[np.isfinite(mv)]
+            if len(mv):
+                mm = mv.mean()
+                ax.plot([x - 0.28, x + 0.28], [mm, mm], color=s["fg"], lw=s["line_width"] * 1.6, zorder=7, solid_capstyle="butt")
+                if len(mv) > 1:
+                    e = _err(mv, s["error"] if s["error"] != "none" else "sd")
+                    ax.errorbar([x], [mm], yerr=[[e], [e]], fmt="none", ecolor=s["fg"], elinewidth=s["error_width"], capsize=s["cap_size"], zorder=7)
+        if paired:
+            M = np.array(means, float)
+            for r in range(M.shape[1]):
+                ax.plot(np.arange(k), M[:, r], color=to_rgba(col[subj_list[r]], 0.8), lw=max(0.6, s["line_width"] * 0.8), zorder=5)
+        ax.set_xticks(np.arange(k))
+        ax.set_xticklabels([g["label"] for g in G])
+        ax.set_xlim(-0.6, k - 0.4)
+        ax.set_ylim(allv.min() - span * 0.06, allv.max() + span * 0.12)
+        handles = [plt.Line2D([], [], ls="none", marker=mk[sid], ms=ms * 1.2, color=col[sid], mec=s["fg"], mew=0.5, label=str(sid)) for sid in subj_list]
+        ax._ll_legend = (handles, [h.get_label() for h in handles])
+        _finish(ax, s, ylabel=ylabel, legend=len(subj_list) <= 12)
+        if ax.get_legend() is not None:
+            ax.get_legend().set_title("Replicate")
+    return fig
+
+
 def analysis_compare(datasets, S, s):
     d = _pick_dataset(datasets, S.get("dataset"))
     df, info = read_table(d["text"])
@@ -1558,22 +1901,44 @@ def analysis_compare(datasets, S, s):
             # test counts biological replicates (avoids pseudoreplication)
             subj = _labels(df, scol, info).astype(str)
             v_all = pd.to_numeric(df[vcol], errors="coerce")
-            nested_rows, values = [], []
+            nested_rows, values, tech, by_group = [], [], [], []
             for g in names:
                 sel = (labels == g) & v_all.notna() & (subj.str.lower() != "nan")
                 grp = v_all[sel].groupby(subj[sel], sort=False)
                 means, counts, sds = grp.mean(), grp.size(), grp.std()
-                values.append(means.to_numpy(float))
+                by_group.append(means)
+                tech.append([(sid, v_all[sel][subj[sel] == sid].to_numpy(float)) for sid in means.index])
                 for sid in means.index:
                     nested_rows.append([g, sid, int(counts[sid]), _r(means[sid]), _r(sds[sid]) if counts[sid] > 1 else None])
-                shared = set(means.index) & set(x for h in names if h != g for x in subj[(labels == h)])
-                if shared:
-                    col_notes.append('Subject ID(s) %s appear in more than one group. IDs should be unique per subject.' % ", ".join(sorted(shared)[:5]))
+            sets = [set(m.index) for m in by_group]
+            replicate_design = len(sets) > 1 and all(x == sets[0] for x in sets) and len(sets[0]) >= 2
+            order = list(by_group[0].index)
+            if replicate_design and S.get("pair_replicates", True):
+                # The same experiments/replicates appear in every group (SuperPlot design): compare them as matched
+                values = [m.reindex(order).to_numpy(float) for m in by_group]
+                paired = True
+                col_notes.append("Each replicate (%s) appears in every group, so replicate means were compared as matched "
+                                 "pairs, as recommended for SuperPlots. Turn off “Pair replicates across groups” to treat them as independent." % scol)
+            else:
+                values = [m.to_numpy(float) for m in by_group]
+                order = list(dict.fromkeys(x for m in by_group for x in m.index))
+                for gi, g in enumerate(names):
+                    shared = sets[gi] & set().union(*[sets[h] for h in range(len(names)) if h != gi]) if len(names) > 1 else set()
+                    if shared and not replicate_design:
+                        col_notes.append('Subject ID(s) %s appear in more than one group but not in all of them. If they are '
+                                         'separate subjects, give them unique IDs.' % ", ".join(sorted(shared)[:5]))
+                        break
             n_tech = len(df[v_all.notna()])
-            n_bio = sum(len(v) for v in values)
-            col_notes.append("Nested design: %d measurements from %d subjects (%s). Each subject's replicates were averaged, "
-                             "so the statistics use n = %d biological replicates." % (n_tech, n_bio, scol, n_bio))
-            nested_info = {"rows": nested_rows, "col": scol, "n_tech": n_tech, "n_bio": n_bio}
+            n_bio = len(order) if paired else sum(len(v) for v in values)
+            if paired:
+                col_notes.append("Nested design: %d measurements from %d replicates (%s), each measured in every group. "
+                                 "Measurements were averaged within each replicate and group, so the statistics use n = %d."
+                                 % (n_tech, n_bio, scol, n_bio))
+            else:
+                col_notes.append("Nested design: %d measurements from %d subjects (%s). Each subject's replicates were averaged, "
+                                 "so the statistics use n = %d biological replicates." % (n_tech, n_bio, scol, n_bio))
+            superplot = {"tech": tech, "order": order, "means": [m.reindex(order).to_numpy(float) for m in by_group]}
+            nested_info = {"rows": nested_rows, "col": scol, "n_tech": n_tech, "n_bio": n_bio, "superplot": superplot}
     else:
         cols = [c for c in (S.get("columns") or []) if c in df.columns and info["kinds"][c] != "text"] \
             or _numeric_cols(df, info)
@@ -1640,12 +2005,39 @@ def analysis_compare(datasets, S, s):
             notes.append("No outliers found by %s." % mname)
     res = compare_stats(names, values, paired=paired, mode=S.get("test", "auto"),
                         posthoc=S.get("posthoc", "all"), equal_var=S.get("equal_var", False))
-    fig = _group_figure(names, values, s, res, paired, ylabel)
+    figures = []
+    if nested_info and S.get("nested_plot", "superplot") == "superplot":
+        sp = nested_info["superplot"]
+        fig = superplot_figure(names, sp["tech"], sp["order"], s, ylabel, paired, sp["means"])
+        figures.append({"id": "superplot", "title": "SuperPlot", "fig": fig, "style": s})
+    else:
+        fig = _group_figure(names, values, s, res, paired, ylabel)
+        figures.append({"id": "groups", "title": "Group comparison", "fig": fig, "style": s})
     shown = [g["label"] for g in _gstyles(s, names)]
     summary = []
     if res["test"]:
         summary.append({"label": res["test"], "value": res["line"], "p": _r(res["p"])})
     tables = [describe(names, values, shown)] + stats_tables(shown, res)
+    if S.get("effect_sizes", True):
+        try:
+            es_table, es_summary = effect_size_table(shown, values, res, paired)
+        except (ValueError, FloatingPointError, ZeroDivisionError, np.linalg.LinAlgError):
+            es_table, es_summary = None, []
+        if es_table:
+            overall = es_table.pop("overall", None)
+            tables.append(es_table)
+            if overall:
+                tables.append({"title": "Overall effect size (ANOVA)", "columns": ["Measure", "Value", "95% CI low", "95% CI high"],
+                               "rows": [[overall[0], overall[1], overall[2], overall[3]], [overall[4], overall[5], None, None]]})
+            summary.extend(es_summary)
+    est = S.get("estimation", "none")
+    if est in ("cumming", "gardner") and len(names) >= 2:
+        try:
+            s_e = dict(s)
+            fig_e, est_rows = estimation_figure(names, values, s_e, paired, ylabel, kind=est if len(names) == 2 else "cumming")
+            figures.append({"id": "estimation", "title": "Estimation plot", "fig": fig_e, "style": s_e})
+        except (ValueError, np.linalg.LinAlgError) as e:
+            notes.append("The estimation plot couldn't be drawn (%s)." % e)
     if out_rows:
         tables.append({"title": "Possible outliers", "columns": ["Group", "Value", "Action"], "rows": out_rows})
     meth = _methods(s, res, norm_note)
@@ -1654,8 +2046,19 @@ def analysis_compare(datasets, S, s):
                        "rows": nested_info["rows"]})
         meth = ("Technical replicates (%d measurements) were averaged within each subject, and the %d subject means were "
                 "analyzed. " % (nested_info["n_tech"], nested_info["n_bio"])) + meth
+    if S.get("effect_sizes", True) and len(names) >= 2:
+        meth = meth.replace("P < 0.05 was considered statistically significant.",
+                            "Effect sizes are reported as mean differences with 95%% confidence intervals (t-based and "
+                            "bias-corrected and accelerated bootstrap, %d resamples) and Hedges' g. P < 0.05 was considered "
+                            "statistically significant." % N_BOOT)
+    if est in ("cumming", "gardner") and len(names) >= 2:
+        meth = meth.replace("Effect sizes are reported", "The estimation plot shows the bootstrap sampling distribution of each "
+                            "mean difference against %s. Effect sizes are reported" % names[0])
+    if nested_info and S.get("nested_plot", "superplot") == "superplot":
+        meth = ("The SuperPlot shows every measurement coloured by %s, with each one's mean as a large symbol and the mean "
+                "of those means as a line (Lord et al., 2020). " % nested_info["col"]) + meth
     return {
-        "figures": [{"id": "groups", "title": "Group comparison", "fig": fig, "style": s}],
+        "figures": figures,
         "tables": tables, "summary": summary, "notes": col_notes + notes + res["notes"],
         "methods": meth, "groups": names,
     }
@@ -2728,9 +3131,17 @@ def analysis_twoway(datasets, S, s):
                                  legend_title=b_name)
     if drawn < 0:
         notes.append("%d comparisons are significant, too many to draw as brackets; see the table." % -drawn)
-    tables = [{"title": "Two-way ANOVA (Type III)", "columns": ["Source", "SS", "df", "MS", "F", "p", "Partial eta squared", "Summary"],
-               "rows": [[names[t["key"]], _r(t["ss"]), t["df"], _r(t["ms"]), _r(t["F"]), _r(t["p"]), _r(t["eta"]), stars(t["p"])]
-                        for t in (tA["AB"], tA["A"], tA["B"])] + [["Residual", _r(res["sse"]), dfe, _r(mse), None, None, None, ""]]}]
+    eci = {}
+    for t_ in (tA["AB"], tA["A"], tA["B"]):
+        try:
+            eci[t_["key"]] = _eta_sq_ci(t_["F"], t_["df"], dfe)
+        except (ValueError, RuntimeError):
+            eci[t_["key"]] = (np.nan, np.nan)
+    tables = [{"title": "Two-way ANOVA (Type III)", "columns": ["Source", "SS", "df", "MS", "F", "p", "Partial eta squared",
+                                                                 "η² 95% CI low", "η² 95% CI high", "Summary"],
+               "rows": [[names[t["key"]], _r(t["ss"]), t["df"], _r(t["ms"]), _r(t["F"]), _r(t["p"]), _r(t["eta"]),
+                         _r(eci[t["key"]][0], 4), _r(eci[t["key"]][1], 4), stars(t["p"])]
+                        for t in (tA["AB"], tA["A"], tA["B"])] + [["Residual", _r(res["sse"]), dfe, _r(mse), None, None, None, None, None, ""]]}]
     cell_names = ["%s · %s" % (a_levels[i], b_levels[j]) for i in range(nA) for j in range(nB)]
     tables.insert(0, describe(cell_names, [clean[(i, j)] for i in range(nA) for j in range(nB)]))
     if rows_pc:
@@ -5072,6 +5483,19 @@ def example(kind):
             rows.append(["S%02d" % (i + 1), "%.0f" % ref, "%.0f" % (ref * 1.04 + 3 + rng.normal(0, 7))])
         return {"datasets": [{"name": "Glucose method comparison", "meta": {}, "text": _tsv(["Sample", "Lab analyzer (mg/dL)", "Handheld meter (mg/dL)"], rows)}],
                 "settings": {"a_col": "Lab analyzer (mg/dL)", "b_col": "Handheld meter (mg/dL)", "mode": "diff"}}
+    if kind == "superplot":
+        # Cell migration speed: ~40 cells tracked in each of 4 independent experiments per condition.
+        # Experiments differ (day-to-day variation), which is exactly what a SuperPlot shows.
+        rows = []
+        for e in range(4):
+            day = rng.normal(0, 2.2)
+            for cond, eff in (("Control", 0.0), ("Knockdown", -4.5)):
+                for c in range(int(rng.integers(30, 50))):
+                    rows.append([cond, "Experiment %d" % (e + 1), "%.2f" % max(0.5, rng.gamma(9, (21 + day + eff) / 9))])
+        return {"analysis": "compare", "title": "SuperPlot (cells from 4 experiments)",
+                "datasets": [{"name": "Cell speed", "meta": {}, "text": _tsv(["Condition", "Experiment", "Speed (µm/h)"], rows)}],
+                "settings": {"layout": "long", "value_col": "Speed (µm/h)", "group_col": "Condition", "subject_col": "Experiment",
+                             "nested_plot": "superplot", "pair_replicates": True, "y_name": "Speed (µm/h)"}}
     raise UserError("No example for %s" % kind)
 
 

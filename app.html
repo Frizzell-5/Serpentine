@@ -11,7 +11,7 @@
 <!-- Figure fonts, so previews match PNG/PDF exports -->
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Fira+Sans:wght@400;700&family=Barlow:wght@400;700&family=Poppins:wght@400;700&family=PT+Serif:wght@400;700&family=Crimson+Text:wght@400;700&family=Courier+Prime:wght@400;700&family=Space+Mono:wght@400;700&family=Comic+Neue:wght@400;700&display=swap">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M21.5 6.5c-5.5 0-11 1.6-11 5.4s11 3.8 11 8.2-5.5 5.4-11 5.4' fill='none' stroke='%23127055' stroke-width='3.2' stroke-linecap='round'/%3E%3Ccircle cx='23' cy='6.5' r='2.9' fill='%23127055'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="app.css?v=1.0.0">
+<link rel="stylesheet" href="app.css?v=1.1.0">
 </head>
 <body>
 <header class="topbar">
@@ -75,7 +75,8 @@
           <li><b>Settings:</b> choose the statistics, baseline and windows.</li>
           <li><b>Style:</b> make the figure your own. Or just type what you want in the box below, like “remove gridlines”.</li>
         </ol>
-        <p>Not sure which analysis? Press <b>Help me choose</b>. New in 1.0: <b>Repeated measures</b>, <b>ROC curves</b>, <b>Method comparison</b> and <b>Import a plate</b> for plate readers. Under every result, <b>Report</b> makes a printable summary and <b>Share link</b> sends a colleague the whole analysis.</p>
+        <p><b>New in 1.1:</b> effect sizes with confidence intervals on every comparison, <b>estimation plots</b>, <b>SuperPlots</b> for cells from several experiments, and a reporting <b>Checklist</b> under each result.</p>
+        <p>Not sure which analysis? Press <b>Help me choose</b>. Also new in 1.0: <b>Repeated measures</b>, <b>ROC curves</b>, <b>Method comparison</b> and <b>Import a plate</b> for plate readers. Under every result, <b>Report</b> makes a printable summary and <b>Share link</b> sends a colleague the whole analysis.</p>
         <p>Press <b>+ Board</b> on figures to combine them into one multi-panel figure, and <b>Sign in</b> to save projects online and open them anywhere. <b>Undo</b> (⌘Z) covers everything, and <b>?</b> shows every keyboard shortcut.</p>
         <p class="fine">Everything runs on your computer. Projects you save online are end-to-end encrypted, so only you can read them.</p>
       </div>
@@ -106,10 +107,12 @@
         <button class="rtab" data-rtab="tables" type="button">Tables</button>
         <button class="rtab" data-rtab="methods" type="button">Methods text</button>
         <button class="rtab" data-rtab="python" type="button">Python script</button>
+        <button class="rtab" data-rtab="checklist" type="button">Checklist</button>
       </div>
       <div id="rpanel-tables" class="rpanel"></div>
       <div id="rpanel-methods" class="rpanel" hidden></div>
       <div id="rpanel-python" class="rpanel" hidden></div>
+      <div id="rpanel-checklist" class="rpanel" hidden></div>
     </div>
   </section>
 </main>
@@ -135,9 +138,9 @@
   </div>
 </div>
 <div id="toast" class="toast" role="status" hidden></div>
-<script src="commands.js?v=1.0.0"></script>
-<script src="app.js?v=1.0.0"></script>
-<script src="plate.js?v=1.0.0"></script>
-<script src="cloud.js?v=1.0.0"></script>
+<script src="commands.js?v=1.1.0"></script>
+<script src="app.js?v=1.1.0"></script>
+<script src="plate.js?v=1.1.0"></script>
+<script src="cloud.js?v=1.1.0"></script>
 </body>
 </html>

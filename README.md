@@ -37,7 +37,7 @@ Serpentine is a browser-based analysis tool for researchers. You paste or upload
 | **Method comparison** | Bland-Altman bias and 95% limits of agreement with confidence intervals (absolute, percent or ratio differences), proportional-bias check, Lin's concordance correlation coefficient and an agreement scatter plot. |
 | **Sample size & power** | No data needed. Required n, achieved power or minimum detectable effect for two groups, paired designs, one-way ANOVA, two proportions and correlations (exact noncentral t/F), with dropout and a methods-ready justification. |
 
-Compare groups can also flag or remove outliers (Grubbs' test or Tukey's fences), average technical replicates within each subject before testing (nested designs, no pseudoreplication), and its descriptive table includes the CV. Two-way ANOVA takes an optional subject column for repeated measures.
+Compare groups reports effect sizes with 95% CIs (mean difference with t and bias-corrected bootstrap intervals, Hedges' g, rank-biserial r; η² with CI and ω² for ANOVA), and can draw Gardner-Altman or Cumming estimation plots. With cells or wells from several experiments it draws a **SuperPlot** (Lord et al., 2020) and tests the experiment means, paired across conditions. Two-way ANOVA reports partial η² with confidence intervals. It can also flag or remove outliers (Grubbs' test or Tukey's fences), average technical replicates within each subject before testing (nested designs, no pseudoreplication), and its descriptive table includes the CV. Two-way ANOVA takes an optional subject column for repeated measures.
 
 **Plate reader import:** paste a 96- or 384-well grid and a plate map; standards, blanks and replicates are recognized, previewed on a live plate, and turned into a table that goes straight into a standard curve.
 
@@ -50,6 +50,7 @@ Compare groups can also flag or remove outliers (Grubbs' test or Tukey's fences)
 - Project files (`.serpentine.json`) to save and reopen your work
 - **Figure board:** combine figures from any analyses into one multi-panel figure at journal widths, lettered A, B, C, exported as PNG, TIFF, PDF or editable SVG
 - **Report:** results, notes, figures, methods and tables on one printable page
+- **Reporting checklist:** each result checked against ARRIVE 2.0, SAMPL and journal statistics requirements, with one-click fixes
 - **Share links:** a link that opens a copy of the whole analysis in anyone's browser, encrypted with a key that exists only in the link (the server can't read it)
 
 ## Getting started
@@ -125,7 +126,7 @@ python3 -m venv .venv && .venv/bin/pip install numpy scipy pandas matplotlib ope
 
 ## Status
 
-Serpentine is at v1.0. Results should be checked against your own understanding of the statistics before publication; the generated methods text is a starting point, not a substitute for describing what you did.
+Serpentine is at v1.1. Results should be checked against your own understanding of the statistics before publication; the generated methods text is a starting point, not a substitute for describing what you did.
 
 ## Author
 

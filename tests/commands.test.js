@@ -367,5 +367,13 @@ run("use ratios", (s,x)=>x.settings.mode==="ratio", {analysis:"agreement"});
 run("show the trend line", (s,x)=>x.settings.show_trend===true, {analysis:"agreement"});
 run("hide the scatter plot", (s,x)=>x.settings.show_scatter===false, {analysis:"agreement"});
 run("dark background", s=>s.theme==="dark", {analysis:"roc"});
+// v1.1: estimation plots, effect sizes, SuperPlots
+run("estimation plot", (s,x)=>x.settings.estimation==="cumming", {analysis:"compare"});
+run("gardner-altman plot", (s,x)=>x.settings.estimation==="gardner", {analysis:"compare"});
+run("remove the estimation plot", (s,x)=>x.settings.estimation==="none", {analysis:"compare", settings:{estimation:"cumming"}});
+run("hide effect sizes", (s,x)=>x.settings.effect_sizes===false, {analysis:"compare"});
+run("show effect sizes", (s,x)=>x.settings.effect_sizes===true, {analysis:"compare", settings:{effect_sizes:false}});
+run("superplot", (s,x)=>x.settings.nested_plot==="superplot", {analysis:"compare", settings:{nested_plot:"means"}});
+run("don't pair the replicates", (s,x)=>x.settings.pair_replicates===false, {analysis:"compare"});
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

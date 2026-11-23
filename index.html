@@ -248,7 +248,7 @@ footer .sp { margin-left: auto; }
   <!-- Hero -->
   <section class="hero">
     <div class="wrap">
-      <div class="eyebrow rise"><span>v1.0</span><i></i><span>Free</span><i></i><span>Runs in your browser</span><i></i><span>Encrypted accounts</span></div>
+      <div class="eyebrow rise"><span>v1.1</span><i></i><span>Free</span><i></i><span>Runs in your browser</span><i></i><span>Encrypted accounts</span></div>
       <h1 class="rise d1">Raw lab data in. <em>Publication figures</em> out.</h1>
       <p class="lede rise d2">Serpentine runs the statistics and draws the figures for you, using the same Python tools behind countless published studies. You choose everything from plain menus and never write a line of code. Your data stays on your computer, and if you want your projects everywhere, a free account keeps them online, end-to-end encrypted.</p>
       <div class="cta rise d3">
@@ -402,6 +402,20 @@ footer .sp { margin-left: auto; }
           <div class="tags"><span>Bland-Altman</span><span>limits of agreement</span><span>Lin's CCC</span><span>assay validation</span></div>
           <figcaption><span class="figlabel">Fig. 16 |</span> Glucose from a handheld meter against the lab analyzer in 40 samples.</figcaption>
         </figure>
+        <figure class="card">
+          <div class="imgs"><img src="docs/img/g-estimation.png" alt="Cumming estimation plot: tumor volumes for vehicle and two drug doses on top, and below, the bootstrap distribution and 95% confidence interval of each dose's difference from vehicle." loading="lazy"></div>
+          <h3>Estimation plots</h3>
+          <p>Show how big the effect is, not just whether p &lt; 0.05. Gardner-Altman and Cumming plots put the raw data next to each mean difference with its bias-corrected bootstrap 95% confidence interval, as recommended by the SAMPL guidelines and ARRIVE 2.0. Every group comparison also reports mean differences, Hedges' g and η² with confidence intervals.</p>
+          <div class="tags"><span>Gardner-Altman</span><span>Cumming</span><span>bootstrap BCa</span><span>Hedges' g</span><span>η² CI</span></div>
+          <figcaption><span class="figlabel">Fig. 17 |</span> Each drug dose against vehicle: a 30 mg/kg dose shrinks tumors by about 370 mm³.</figcaption>
+        </figure>
+        <figure class="card">
+          <div class="imgs"><img src="docs/img/g-superplot.png" alt="SuperPlot of cell speed in control and knockdown cells: hundreds of faint cells colored by experiment, with each experiment's mean as a large symbol joined across conditions." loading="lazy"></div>
+          <h3>SuperPlots</h3>
+          <p>For cells, wells or images from a few independent experiments. Every measurement is shown, coloured by experiment, with each experiment's mean on top (Lord et al., 2020). Statistics use the experiment means, paired across conditions, so n is the number of experiments, not the number of cells.</p>
+          <div class="tags"><span>biological replicates</span><span>no pseudoreplication</span><span>cell biology</span><span>imaging</span></div>
+          <figcaption><span class="figlabel">Fig. 18 |</span> Migration speed of 329 cells from four experiments; paired t-test on the four experiment means.</figcaption>
+        </figure>
       </div>
       <figure class="card board-card" style="margin-top:24px">
         <div class="imgs"><img src="docs/img/g-board.png" alt="A four-panel figure lettered A to D combining a raincloud plot, a two-way ANOVA, dose-response curves and qPCR fold changes." loading="lazy"></div>
@@ -514,6 +528,16 @@ footer .sp { margin-left: auto; }
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 12h7M9 16h7"/></svg>
           <h3>One-click reports</h3>
           <p>Results, figures, methods and tables on one printable page for your lab notebook, a meeting or a supervisor.</p>
+        </div>
+        <div class="feature">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M3.5 6l1.2 1.2L7 5M3.5 12l1.2 1.2L7 11M3.5 18l1.2 1.2L7 17"/></svg>
+          <h3>Reporting checklist</h3>
+          <p>Every result is checked against ARRIVE 2.0, SAMPL and journal statistics rules: exact n and p, effect sizes with CIs, individual points, error bars, replicates. Most gaps are fixed with one click.</p>
+        </div>
+        <div class="feature">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16"/><path d="M7 16V9M12 16V5M17 16v-4"/><path d="M5 9h4M10 5h4M15 12h4"/></svg>
+          <h3>Effect sizes, not just p values</h3>
+          <p>Mean differences with t and bootstrap confidence intervals, Hedges' g, rank-biserial r, and η² with CIs for every ANOVA, plus Gardner-Altman and Cumming estimation plots.</p>
         </div>
       </div>
     </div>
@@ -671,6 +695,17 @@ H    Blank      Blank</pre>
               </tbody>
             </table></div>
             <p>Effect sizes (Hedges' g or Cohen's d<sub>z</sub>) are reported for two-group tests. Groups with fewer than five values trigger a reminder to show individual points and interpret p-values carefully.</p>
+            <h4>Effect sizes and estimation plots</h4>
+            <p>Every group comparison reports how big each difference is, with a 95% confidence interval: the mean difference (t-based and bias-corrected bootstrap with 5,000 resamples), the percent difference, Hedges' g, and the rank-biserial correlation for non-parametric tests. ANOVAs add η² with a confidence interval and ω²; two-way ANOVA gives partial η² with confidence intervals. Turn on an <strong>Estimation plot</strong> in Settings to draw each difference from the first group with its bootstrap distribution: Gardner-Altman for two groups, or Cumming for any number. Bootstrap intervals use a fixed seed, so the same data always give the same interval.</p>
+            <h4>SuperPlots and biological replicates</h4>
+            <p>Hundreds of cells from three experiments are n = 3, not n = 300. Use the values + group layout with a column naming the experiment (or animal, culture, plate), and set <strong>Replicates nested in</strong> to it. Serpentine draws a <strong>SuperPlot</strong>: every measurement, coloured by experiment, with each experiment's mean as a large symbol. The test uses the experiment means; when every experiment appears in every condition, they are paired, as Lord et al. (2020) recommend. Press <em>Open the SuperPlot example</em> in Settings to see one.</p>
+<pre class="sample">Condition   Experiment     Speed (µm/h)
+Control     Experiment 1   21.4
+Control     Experiment 1   18.9
+Knockdown   Experiment 1   15.2
+…</pre>
+            <h4>Reporting checklist</h4>
+            <p>The <strong>Checklist</strong> tab under the results compares what you are about to report with ARRIVE 2.0, the SAMPL guidelines and common journal statistics requirements: exact n, the tests named, exact p values, effect sizes with confidence intervals, individual points on the figure, what the error bars mean, assumption checks, multiple-comparison corrections, excluded data and biological replicates. Items that can be fixed have a button, such as <em>Show p values</em> or <em>Show the points</em>, and <em>Copy checklist</em> puts it on your clipboard for a submission form.</p>
             <h4>Repeated measures over time</h4>
             <p>When the same subjects are measured at several time points, use <strong>Repeated measures</strong> (or add a subject column in Two-way ANOVA). Serpentine works out the design from the subject IDs: a <em>mixed design</em> when each subject stays in one group, or <em>repeated measures on both factors</em> when every subject gets every combination. Sphericity is corrected with Greenhouse-Geisser by default (ε is reported), comparisons within the same subjects use paired t-tests, and Šidák or Holm corrects for multiple comparisons. Results match pingouin and SPSS.</p>
           </article>
@@ -781,6 +816,7 @@ H    Blank      Blank</pre>
       </div>
       <div class="faq">
         <details><summary>Is my data uploaded anywhere?</summary><p>Not unless you choose to. All parsing, statistics and drawing happen on your computer, and your latest project is kept in your browser's local storage. If you create an account and save projects online, they are encrypted on your computer with your password first (end-to-end encryption), so the server stores only scrambled data that no one else can read, including whoever runs Serpentine.</p></details>
+        <details><summary>Why does my SuperPlot say n = 3 when I measured hundreds of cells?</summary><p>Cells from the same experiment share that day's culture, reagents and imaging, so they aren't independent. Treating them as n = 300 makes tiny p values from day-to-day noise (pseudoreplication). The honest n is the number of independent experiments, which is what Serpentine tests, while the plot still shows every cell.</p></details>
         <details><summary>Can the person I send a share link to see my other projects?</summary><p>No. A share link opens a copy of one analysis as it was when you made the link. They can change their copy freely; your project and account are untouched. Remove the link in <em>Share link → Your links</em> to stop it working.</p></details>
         <details><summary>I forgot my password. Can you reset it?</summary><p>Because projects are end-to-end encrypted, nobody can reset it for you. Use <em>Forgot password?</em> with the recovery key you saved when you created the account. Without the recovery key and the password, online projects can't be opened; copies saved as files are unaffected.</p></details>
         <details><summary>Is it free?</summary><p>Yes. Serpentine is free to use, online or downloaded.</p></details>
@@ -806,7 +842,7 @@ H    Blank      Blank</pre>
 
 <footer>
   <div class="wrap">
-    <span><b style="color:var(--ink)">Serpentine</b> v1.0 · Made by Shadan Alrawi</span>
+    <span><b style="color:var(--ink)">Serpentine</b> v1.1 · Made by Shadan Alrawi</span>
     <a href="https://github.com/Frizzell-5/Serpentine">GitHub</a>
     <a href="https://github.com/Frizzell-5/Serpentine/issues">Report an issue</a>
     <span class="sp">Built on Pyodide, NumPy, SciPy, pandas and matplotlib.</span>

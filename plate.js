@@ -196,6 +196,7 @@ const Plate = (() => {
       state.analysis = "stdcurve";
       Object.assign(state.settings.stdcurve, { dataset: d.id, conc_col: "Concentration", name_col: "Sample", signal_cols: [], blank: b.stats.blank ? "subtract" : "none" });
     }
+    if (typeof scheduleInspect === "function") scheduleInspect(d.id, 10);
     close();
     renderAnalysis();
     renderData();

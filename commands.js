@@ -454,6 +454,11 @@
           else if (/\bdifference from (the )?(control|first group|vehicle)\b|\bsubtract (the )?(control|vehicle)\b/.test(c)) { settings.normalize = "delta_control"; say("Values as difference from the first group"); }
           else if (/\b(raw|original|actual) (values|data|numbers)\b|\bno normali[sz]ation\b|\bdon'?t normali[sz]e\b/.test(c)) { settings.normalize = "none"; say("Values as entered"); }
           if ((m = c.match(/\bcall (it|the (y|value|measurement)( axis)?)\s+(.+)$/))) { /* handled by labels */ }
+          if (/\bgardner[- ]?altman\b/.test(c)) { settings.estimation = NEG.test(c) ? "none" : "gardner"; say(settings.estimation === "none" ? "Estimation plot removed" : "Gardner-Altman estimation plot"); }
+          else if (/\bcumming\b|\bestimation (plot|graphics?|chart)\b|\bdabest\b/.test(c)) { settings.estimation = NEG.test(c) ? "none" : "cumming"; say(settings.estimation === "none" ? "Estimation plot removed" : "Cumming estimation plot"); }
+          if (/\beffect sizes?\b|\bhedges\b|\beta squared\b|\bη²/.test(c) && !/\bestimation\b/.test(c)) { settings.effect_sizes = !NEG.test(c); say(settings.effect_sizes ? "Effect sizes with 95% CIs reported" : "Effect sizes hidden"); }
+          if (/\bsuper ?plots?\b/.test(c)) { settings.nested_plot = NEG.test(c) ? "means" : "superplot"; say(settings.nested_plot === "superplot" ? "SuperPlot" : "Subject means only"); }
+          if (/\bpair(ed)? (the )?(replicates|experiments)\b|\bmatch(ed)? (the )?(replicates|experiments)\b/.test(c)) { settings.pair_replicates = !NEG.test(c); say(settings.pair_replicates ? "Replicates paired across groups" : "Replicates treated as independent"); }
         } else if (ctx.analysis === "correlation") {
           if (/\bspearman\b|\brank correlation\b/.test(c)) { settings.method = "spearman"; say("Spearman correlation"); }
           else if (/\bpearson\b|\blinear correlation\b/.test(c)) { settings.method = "pearson"; say("Pearson correlation"); }
